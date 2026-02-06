@@ -290,9 +290,10 @@ async function sendRequest(config, prompt) {
 function parseAIResponse(content) {
   let cleaned = content.trim();
 
-  // Remove markdown code blocks
-  if (cleaned.startsWith('```')) {
-    cleaned = cleaned.replace(/^```(?:json)?\s*\n?/, '').replace(/\n?```\s*$/, '');
+  // Remove markdown code blocks anywhere in the response (not just at start)
+  const codeBlockMatch = cleaned.match(/```(?:json)?\s*\n?([\s\S]*?)\n?```/);
+  if (codeBlockMatch) {
+    cleaned = codeBlockMatch[1].trim();
   }
 
   // Try to extract JSON object
@@ -328,7 +329,13 @@ function parseAIResponse(content) {
       summary: parsed.summary || `Found ${validEdits.length} suggested changes`
     };
   } catch (e) {
-    throw new Error('Failed to parse AI response. The AI may have returned an invalid format.');
+    // Include a preview of what the AI returned so the user can diagnose
+    const preview = content.length > 200 ? content.substring(0, 200) + '…' : content;
+    const noClosingBrace = content.includes('{') && !content.includes('}');
+    const hint = noClosingBrace
+      ? ' The response appears truncated — try a model with a larger output limit.'
+      : ' The AI returned text instead of JSON — try again or use a different model.';
+    throw new Error('Failed to parse AI response.' + hint + '\n\nAI returned: ' + preview);
   }
 }
 

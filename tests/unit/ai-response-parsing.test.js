@@ -66,6 +66,13 @@ describe('AI response parsing', () => {
       expect(result.edits[0].target_text).toBe('unlimited liability');
     });
 
+    it('handles code blocks preceded by text', () => {
+      const wrapped = 'Here are the suggested edits:\n```json\n' + VALID_EDITS_JSON + '\n```\n';
+      const result = _parseAIResponse(wrapped);
+      expect(result.edits).toHaveLength(1);
+      expect(result.edits[0].target_text).toBe('unlimited liability');
+    });
+
     it('handles JSON embedded in surrounding text', () => {
       const messy = 'Here are the edits:\n' + VALID_EDITS_JSON + '\nHope that helps!';
       const result = _parseAIResponse(messy);
