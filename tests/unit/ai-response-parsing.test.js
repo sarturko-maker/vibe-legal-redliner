@@ -55,7 +55,7 @@ describe('AI response parsing', () => {
   });
 
   describe('malformed JSON', () => {
-    it('throws on unparseable input', () => {
+    it('throws on completely unparseable input', () => {
       expect(() => _parseAIResponse('this is not json at all')).toThrow(/failed to parse/i);
     });
 
@@ -84,6 +84,31 @@ describe('AI response parsing', () => {
       const result = _parseAIResponse(unclosed);
       expect(result.edits).toHaveLength(1);
       expect(result.edits[0].target_text).toBe('unlimited liability');
+    });
+
+    it('fixes trailing commas in JSON', () => {
+      const json = '{"edits": [{"target_text": "old", "new_text": "new", "comment": "fix",},], "summary": "ok",}';
+      const result = _parseAIResponse(json);
+      expect(result.edits).toHaveLength(1);
+      expect(result.edits[0].target_text).toBe('old');
+    });
+
+    it('repairs truncated JSON by closing open brackets', () => {
+      const truncated = '{"edits": [{"target_text": "old text", "new_text": "new text", "comment": "fix"}';
+      const result = _parseAIResponse(truncated);
+      expect(result.edits).toHaveLength(1);
+      expect(result.edits[0].target_text).toBe('old text');
+    });
+
+    it('recovers complete edits from truncated response with multiple edits', () => {
+      const truncated = '{"edits": [' +
+        '{"target_text": "first", "new_text": "replacement1", "comment": "c1"},' +
+        '{"target_text": "second", "new_text": "replacement2", "comment": "c2"},' +
+        '{"target_text": "third", "new_text": "incomple';
+      const result = _parseAIResponse(truncated);
+      expect(result.edits.length).toBeGreaterThanOrEqual(2);
+      expect(result.edits[0].target_text).toBe('first');
+      expect(result.edits[1].target_text).toBe('second');
     });
   });
 

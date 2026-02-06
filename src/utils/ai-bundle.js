@@ -314,38 +314,104 @@ function parseAIResponse(content) {
     return '';
   });
 
-  try {
-    const parsed = JSON.parse(cleaned);
+  // Attempt 1: direct parse
+  const parsed = tryParseJSON(cleaned);
+  if (parsed) return validateEdits(parsed);
 
-    if (!parsed.edits || !Array.isArray(parsed.edits)) {
-      return { edits: [], summary: 'Invalid response format - no edits array' };
-    }
+  // Attempt 2: fix trailing commas (common AI mistake)
+  const fixedCommas = cleaned.replace(/,\s*([}\]])/g, '$1');
+  const parsed2 = tryParseJSON(fixedCommas);
+  if (parsed2) return validateEdits(parsed2);
 
-    // Validate and clean each edit
-    const validEdits = parsed.edits
-      .filter(edit => typeof edit.target_text === 'string' && typeof edit.new_text === 'string')
-      .map(edit => ({
-        target_text: edit.target_text.trim(),
-        new_text: edit.new_text,
-        comment: edit.comment || ''
-      }));
-
-    return {
-      edits: validEdits,
-      summary: parsed.summary || `Found ${validEdits.length} suggested changes`
-    };
-  } catch (e) {
-    // Detect truncation: response has opening { but unbalanced braces
-    const opens = (cleaned.match(/\{/g) || []).length;
-    const closes = (cleaned.match(/\}/g) || []).length;
-    const truncated = opens > closes;
-
-    const preview = content.length > 200 ? content.substring(0, 200) + '…' : content;
-    const hint = truncated
-      ? ' The response was cut off before completing. The document may be too complex for the current model — try a different model or simplify the playbook.'
-      : ' The AI returned text instead of JSON — try again or use a different model.';
-    throw new Error('Failed to parse AI response.' + hint + '\n\nAI returned: ' + preview);
+  // Attempt 3: truncated JSON — close open brackets/braces
+  const repaired = repairTruncatedJSON(fixedCommas);
+  if (repaired) {
+    const parsed3 = tryParseJSON(repaired);
+    if (parsed3) return validateEdits(parsed3);
   }
+
+  // Attempt 4: extract individual edit objects via regex
+  const rescued = rescueEdits(cleaned);
+  if (rescued.length > 0) {
+    return {
+      edits: rescued,
+      summary: `Recovered ${rescued.length} edits from malformed response`
+    };
+  }
+
+  const preview = content.length > 200 ? content.substring(0, 200) + '…' : content;
+  throw new Error('Failed to parse AI response. Try a different model or simplify the playbook.\n\nAI returned: ' + preview);
+}
+
+/** Try JSON.parse, return null on failure */
+function tryParseJSON(str) {
+  try { return JSON.parse(str); } catch { return null; }
+}
+
+/** Validate and normalize a parsed response */
+function validateEdits(parsed) {
+  if (!parsed.edits || !Array.isArray(parsed.edits)) {
+    return { edits: [], summary: 'Invalid response format - no edits array' };
+  }
+  const validEdits = parsed.edits
+    .filter(edit => typeof edit.target_text === 'string' && typeof edit.new_text === 'string')
+    .map(edit => ({
+      target_text: edit.target_text.trim(),
+      new_text: edit.new_text,
+      comment: edit.comment || ''
+    }));
+  return {
+    edits: validEdits,
+    summary: parsed.summary || `Found ${validEdits.length} suggested changes`
+  };
+}
+
+/** Try to close truncated JSON by appending missing brackets/braces */
+function repairTruncatedJSON(str) {
+  // Remove any trailing incomplete string value (text cut off mid-string)
+  let repaired = str.replace(/,\s*"[^"]*":\s*"[^"]*$/, '');
+  if (repaired === str) {
+    // Also try removing a trailing incomplete object
+    repaired = str.replace(/,\s*\{[^}]*$/, '');
+  }
+
+  // Count unmatched openers and close them
+  const stack = [];
+  let inString = false;
+  let escaped = false;
+  for (const ch of repaired) {
+    if (escaped) { escaped = false; continue; }
+    if (ch === '\\' && inString) { escaped = true; continue; }
+    if (ch === '"') { inString = !inString; continue; }
+    if (inString) continue;
+    if (ch === '{' || ch === '[') stack.push(ch);
+    if (ch === '}' || ch === ']') stack.pop();
+  }
+
+  if (stack.length === 0) return null; // Not truncated
+  // Close in reverse order
+  const closers = stack.reverse().map(ch => ch === '{' ? '}' : ']').join('');
+  return repaired + closers;
+}
+
+/** Last resort: regex-extract individual complete edit objects */
+function rescueEdits(str) {
+  const edits = [];
+  // Match objects containing target_text and new_text
+  const pattern = /\{\s*"target_text"\s*:\s*"((?:[^"\\]|\\.)*)"\s*,\s*"new_text"\s*:\s*"((?:[^"\\]|\\.)*)"\s*(?:,\s*"comment"\s*:\s*"((?:[^"\\]|\\.)*)")?\s*\}/g;
+  let m;
+  while ((m = pattern.exec(str)) !== null) {
+    try {
+      edits.push({
+        target_text: JSON.parse('"' + m[1] + '"').trim(),
+        new_text: JSON.parse('"' + m[2] + '"'),
+        comment: m[3] ? JSON.parse('"' + m[3] + '"') : ''
+      });
+    } catch {
+      // Skip malformed individual edit
+    }
+  }
+  return edits;
 }
 
 /**
