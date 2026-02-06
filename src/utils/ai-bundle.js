@@ -281,7 +281,9 @@ async function sendRequest(config, prompt) {
     throw new Error(`No response from ${config.name}. The model returned an empty result — try a different model.`);
   }
 
-  return parseAIResponse(content);
+  const parsed = parseAIResponse(content);
+  parsed.rawContent = content;
+  return parsed;
 }
 
 /**

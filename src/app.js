@@ -136,6 +136,11 @@ async function processDocument() {
       playbookText: playbook.playbookText
     });
 
+    // Store edits for UI display
+    console.log('[VibeLegal] Raw AI response:', aiResponse.rawContent);
+    console.log('[VibeLegal] Parsed edits:', aiResponse.edits);
+    state.review.edits = aiResponse.edits;
+
     state.review.job.progress = 60;
     state.review.job.operations_total = aiResponse.edits.length;
     state.review.job.current_phase = `Found ${aiResponse.edits.length} changes. Applying redlines...`;
@@ -185,6 +190,13 @@ async function processDocument() {
         const applied = response.applied ?? aiResponse.edits.length;
         const skipped = response.skipped ?? 0;
         state.review.job.operations_complete = applied;
+        // Merge per-edit statuses into stored edits
+        if (response.statuses && state.review.edits) {
+          state.review.edits = state.review.edits.map((edit, i) => ({
+            ...edit,
+            applied: response.statuses[i] ?? false
+          }));
+        }
         if (skipped > 0) {
           state.review.job.current_phase = `Complete — ${applied} of ${applied + skipped} edits applied (${skipped} could not be matched in the document)`;
         } else {
@@ -612,6 +624,7 @@ function handleClick(e) {
       state.review.file = null;
       state.review.job = null;
       state.review.result = null;
+      state.review.edits = null;
       render();
       break;
 

@@ -903,3 +903,99 @@
   gap: var(--space-2);
   margin-top: var(--space-3);
 }
+
+/* === Edits Panel === */
+.edits-panel {
+  margin-top: var(--space-3);
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+
+.edits-summary {
+  padding: var(--space-3) var(--space-4);
+  background: var(--bg-secondary);
+  cursor: pointer;
+  font-size: var(--text-sm);
+  font-weight: var(--font-medium);
+  color: var(--text-secondary);
+  user-select: none;
+}
+
+.edits-summary:hover {
+  background: var(--bg-tertiary);
+}
+
+.edits-list {
+  max-height: 400px;
+  overflow-y: auto;
+}
+
+.edit-item {
+  padding: var(--space-3) var(--space-4);
+  border-top: 1px solid var(--border-light);
+  font-size: var(--text-sm);
+}
+
+.edit-item.applied {
+  border-left: 3px solid var(--accent-green);
+}
+
+.edit-item.skipped {
+  border-left: 3px solid #ef4444;
+  background: #fefefe;
+}
+
+.edit-header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-bottom: var(--space-2);
+}
+
+.edit-number {
+  font-weight: var(--font-semibold);
+  color: var(--text-tertiary);
+  font-size: var(--text-xs);
+}
+
+.edit-status {
+  font-size: var(--text-xs);
+  font-weight: var(--font-medium);
+  padding: 1px 6px;
+  border-radius: var(--radius-sm);
+}
+
+.edit-status.applied {
+  background: #ecfdf5;
+  color: #065f46;
+}
+
+.edit-status.skipped {
+  background: #fef2f2;
+  color: #991b1b;
+}
+
+.edit-field {
+  display: flex;
+  gap: var(--space-2);
+  margin-bottom: 2px;
+  line-height: 1.4;
+}
+
+.edit-label {
+  flex-shrink: 0;
+  font-weight: var(--font-medium);
+  color: var(--text-tertiary);
+  min-width: 52px;
+}
+
+.edit-value {
+  color: var(--text-primary);
+  word-break: break-word;
+}
+
+.edit-comment {
+  color: var(--text-secondary);
+  font-style: italic;
+}

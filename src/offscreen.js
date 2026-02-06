@@ -217,7 +217,25 @@ def process_document(docx_bytes: bytes, edits_json: str, author: str = 'Vibe Leg
     input_stream = BytesIO(docx_bytes)
     try:
         engine = RedlineEngine(input_stream, author=author)
-        applied, skipped = engine.apply_edits(edits)
+
+        # Apply edits one at a time to track per-edit status.
+        # Sort longest target_text first (matches Adeu's internal strategy)
+        # but preserve original indices for status reporting.
+        indexed = list(enumerate(edits))
+        indexed.sort(key=lambda x: len(x[1].target_text), reverse=True)
+
+        statuses = [False] * len(edits)
+        applied = 0
+        skipped = 0
+
+        for orig_idx, edit in indexed:
+            a, _s = engine.apply_edits([edit])
+            if a > 0:
+                statuses[orig_idx] = True
+                applied += 1
+            else:
+                skipped += 1
+
         enable_track_changes(engine.doc)
         strip_comments(engine.doc)
         output_stream = engine.save_to_stream()
@@ -225,7 +243,7 @@ def process_document(docx_bytes: bytes, edits_json: str, author: str = 'Vibe Leg
             doc_bytes = output_stream.getvalue()
         finally:
             output_stream.close()
-        return {"doc_bytes": doc_bytes, "applied": applied, "skipped": skipped}
+        return {"doc_bytes": doc_bytes, "applied": applied, "skipped": skipped, "statuses": json.dumps(statuses)}
     finally:
         input_stream.close()
 `);
@@ -261,6 +279,7 @@ result
   const outputBytes = new Uint8Array(resultMap.get('doc_bytes'));
   const applied = resultMap.get('applied');
   const skipped = resultMap.get('skipped');
+  const statuses = JSON.parse(resultMap.get('statuses'));
 
   // -----------------------------------------------------------------------
   // Data lifecycle cleanup
@@ -300,7 +319,7 @@ except NameError:
     pass
   `);
 
-  return { outputBytes, applied, skipped };
+  return { outputBytes, applied, skipped, statuses };
 }
 
 // Listen for messages from the service worker or popup
@@ -314,13 +333,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     const { contractBytes, edits } = message;
 
     processDocument(new Uint8Array(contractBytes), JSON.stringify(edits))
-      .then(({ outputBytes, applied, skipped }) => {
+      .then(({ outputBytes, applied, skipped, statuses }) => {
         // Array.from() copies the bytes into the response; null the
         // Uint8Array immediately so it can be GC'd without waiting
         // for the callback scope to unwind.
         const response = Array.from(outputBytes);
         outputBytes = null;
-        sendResponse({ success: true, result: response, applied, skipped });
+        sendResponse({ success: true, result: response, applied, skipped, statuses });
       })
       .catch(error => {
         sendResponse({ success: false, error: error.message || 'Document processing failed' });

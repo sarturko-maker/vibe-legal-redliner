@@ -174,10 +174,10 @@ function renderJobStatus(job, result) {
       <div class="status-card success">
         <div class="status-icon">&#10004;</div>
         <div class="status-text">
-          <strong>Complete</strong>
-          <p>${job.operations_total} changes applied</p>
+          <strong>${escapeHtml(job.current_phase)}</strong>
         </div>
       </div>
+      ${renderEditsPanel()}
     `;
   }
 
@@ -196,6 +196,44 @@ function renderJobStatus(job, result) {
         </div>
       ` : ''}
     </div>
+  `;
+}
+
+function renderEditsPanel() {
+  const edits = state.review?.edits;
+  if (!edits || edits.length === 0) return '';
+
+  return `
+    <details class="edits-panel">
+      <summary class="edits-summary">View AI edits (${edits.length})</summary>
+      <div class="edits-list">
+        ${edits.map((edit, i) => {
+    const statusClass = edit.applied === true ? 'applied' : edit.applied === false ? 'skipped' : '';
+    const statusLabel = edit.applied === true ? 'Applied' : edit.applied === false ? 'Skipped' : '';
+    return `
+          <div class="edit-item ${statusClass}">
+            <div class="edit-header">
+              <span class="edit-number">#${i + 1}</span>
+              ${statusLabel ? `<span class="edit-status ${statusClass}">${statusLabel}</span>` : ''}
+            </div>
+            <div class="edit-field">
+              <span class="edit-label">Find:</span>
+              <span class="edit-value">${escapeHtml(edit.target_text)}</span>
+            </div>
+            <div class="edit-field">
+              <span class="edit-label">Replace:</span>
+              <span class="edit-value">${escapeHtml(edit.new_text || '(delete)')}</span>
+            </div>
+            ${edit.comment ? `
+            <div class="edit-field">
+              <span class="edit-label">Reason:</span>
+              <span class="edit-value edit-comment">${escapeHtml(edit.comment)}</span>
+            </div>
+            ` : ''}
+          </div>`;
+  }).join('')}
+      </div>
+    </details>
   `;
 }
 
