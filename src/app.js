@@ -182,8 +182,15 @@ async function processDocument() {
         state.review.result = new Uint8Array(response.result);
         state.review.job.status = JOB_STATUS.COMPLETE;
         state.review.job.progress = 100;
-        state.review.job.current_phase = 'Complete';
-        writeAuditLogEntry({ filename: file.name, fileSizeBytes: file.size, provider: state.settings.provider, model: state.settings.model, editsReturned: aiResponse.edits.length, status: 'success' });
+        const applied = response.applied ?? aiResponse.edits.length;
+        const skipped = response.skipped ?? 0;
+        state.review.job.operations_complete = applied;
+        if (skipped > 0) {
+          state.review.job.current_phase = `Complete — ${applied} of ${applied + skipped} edits applied (${skipped} could not be matched in the document)`;
+        } else {
+          state.review.job.current_phase = `Complete — ${applied} edits applied`;
+        }
+        writeAuditLogEntry({ filename: file.name, fileSizeBytes: file.size, provider: state.settings.provider, model: state.settings.model, editsReturned: aiResponse.edits.length, editsApplied: applied, editsSkipped: skipped, status: 'success' });
       } else {
         state.review.job.status = JOB_STATUS.ERROR;
         // Sanitize error message to avoid leaking internal details
@@ -338,8 +345,14 @@ async function processBatch() {
         job.result = new Uint8Array(response.result);
         job.status = JOB_STATUS.COMPLETE;
         job.progress = 100;
-        job.phase = 'Complete';
-        writeAuditLogEntry({ filename: file.name, fileSizeBytes: file.size, provider: state.settings.provider, model: state.settings.model, editsReturned: job.editCount, status: 'success' });
+        const applied = response.applied ?? job.editCount;
+        const skipped = response.skipped ?? 0;
+        if (skipped > 0) {
+          job.phase = `Complete — ${applied}/${applied + skipped} applied`;
+        } else {
+          job.phase = `Complete — ${applied} edits applied`;
+        }
+        writeAuditLogEntry({ filename: file.name, fileSizeBytes: file.size, provider: state.settings.provider, model: state.settings.model, editsReturned: job.editCount, editsApplied: applied, editsSkipped: skipped, status: 'success' });
       } else {
         throw new Error(response?.error || 'Document processing failed.');
       }

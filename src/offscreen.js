@@ -206,7 +206,7 @@ def strip_comments(doc):
             pass
         del doc.part.rels[rel_key]
 
-def process_document(docx_bytes: bytes, edits_json: str, author: str = 'Vibe Legal') -> bytes:
+def process_document(docx_bytes: bytes, edits_json: str, author: str = 'Vibe Legal') -> dict:
     edits_data = json.loads(edits_json)
     edits = []
     for edit in edits_data:
@@ -217,14 +217,15 @@ def process_document(docx_bytes: bytes, edits_json: str, author: str = 'Vibe Leg
     input_stream = BytesIO(docx_bytes)
     try:
         engine = RedlineEngine(input_stream, author=author)
-        engine.apply_edits(edits)
+        applied, skipped = engine.apply_edits(edits)
         enable_track_changes(engine.doc)
         strip_comments(engine.doc)
         output_stream = engine.save_to_stream()
         try:
-            return output_stream.getvalue()
+            doc_bytes = output_stream.getvalue()
         finally:
             output_stream.close()
+        return {"doc_bytes": doc_bytes, "applied": applied, "skipped": skipped}
     finally:
         input_stream.close()
 `);
@@ -256,7 +257,10 @@ result = process_document(contract_bytes, js_edits_json)
 result
   `);
 
-  const outputBytes = new Uint8Array(result.toJs());
+  const resultMap = result.toJs();
+  const outputBytes = new Uint8Array(resultMap.get('doc_bytes'));
+  const applied = resultMap.get('applied');
+  const skipped = resultMap.get('skipped');
 
   // -----------------------------------------------------------------------
   // Data lifecycle cleanup
@@ -296,7 +300,7 @@ except NameError:
     pass
   `);
 
-  return outputBytes;
+  return { outputBytes, applied, skipped };
 }
 
 // Listen for messages from the service worker or popup
@@ -310,13 +314,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     const { contractBytes, edits } = message;
 
     processDocument(new Uint8Array(contractBytes), JSON.stringify(edits))
-      .then(outputBytes => {
+      .then(({ outputBytes, applied, skipped }) => {
         // Array.from() copies the bytes into the response; null the
         // Uint8Array immediately so it can be GC'd without waiting
         // for the callback scope to unwind.
         const response = Array.from(outputBytes);
         outputBytes = null;
-        sendResponse({ success: true, result: response });
+        sendResponse({ success: true, result: response, applied, skipped });
       })
       .catch(error => {
         sendResponse({ success: false, error: error.message || 'Document processing failed' });
