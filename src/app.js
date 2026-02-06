@@ -195,14 +195,11 @@ async function processDocument() {
 
   } catch (error) {
     state.review.job.status = JOB_STATUS.ERROR;
-    // Show user-friendly error messages
-    let userMessage = error.message;
-    if (error.message.includes('API') || error.message.includes('key')) {
-      userMessage = error.message; // Keep API-related messages as they're user-relevant
-    } else if (error.message.includes('Invalid') || error.message.includes('empty') || error.message.includes('large')) {
-      userMessage = error.message; // Keep validation messages
-    } else if (error.message.includes('Engine') || error.message.includes('initialise') || error.message.includes('Pyodide')) {
-      userMessage = error.message; // Keep engine-related messages
+    // All errors thrown within the try block are user-facing.
+    // Only suppress truly unexpected errors (e.g. TypeError from a coding bug).
+    let userMessage;
+    if (error.message && !(error instanceof TypeError) && !(error instanceof ReferenceError)) {
+      userMessage = error.message;
     } else {
       console.error('[VibeLegal] processDocument error:', error);
       userMessage = 'An error occurred while processing your document. Please try again.';
