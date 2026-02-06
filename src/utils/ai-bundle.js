@@ -318,7 +318,7 @@ function parseAIResponse(content) {
       summary: parsed.summary || `Found ${validEdits.length} suggested changes`
     };
   } catch (e) {
-    return { edits: [], summary: 'Failed to parse AI response. The AI may have returned an invalid format.' };
+    throw new Error('Failed to parse AI response. The AI may have returned an invalid format.');
   }
 }
 

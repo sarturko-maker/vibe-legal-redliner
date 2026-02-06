@@ -55,10 +55,8 @@ describe('AI response parsing', () => {
   });
 
   describe('malformed JSON', () => {
-    it('returns empty edits instead of throwing', () => {
-      const result = _parseAIResponse('this is not json at all');
-      expect(result.edits).toEqual([]);
-      expect(result.summary).toMatch(/failed to parse/i);
+    it('throws on unparseable input', () => {
+      expect(() => _parseAIResponse('this is not json at all')).toThrow(/failed to parse/i);
     });
 
     it('handles JSON wrapped in markdown code blocks', () => {
@@ -76,14 +74,12 @@ describe('AI response parsing', () => {
   });
 
   describe('empty response', () => {
-    it('returns empty edits for empty string', () => {
-      const result = _parseAIResponse('');
-      expect(result.edits).toEqual([]);
+    it('throws for empty string', () => {
+      expect(() => _parseAIResponse('')).toThrow();
     });
 
-    it('returns empty edits for whitespace-only', () => {
-      const result = _parseAIResponse('   \n\n  ');
-      expect(result.edits).toEqual([]);
+    it('throws for whitespace-only', () => {
+      expect(() => _parseAIResponse('   \n\n  ')).toThrow();
     });
   });
 
