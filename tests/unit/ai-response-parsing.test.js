@@ -78,6 +78,13 @@ describe('AI response parsing', () => {
       const result = _parseAIResponse(messy);
       expect(result.edits).toHaveLength(1);
     });
+
+    it('handles unclosed code block (truncated response)', () => {
+      const unclosed = '```json\n' + VALID_EDITS_JSON;
+      const result = _parseAIResponse(unclosed);
+      expect(result.edits).toHaveLength(1);
+      expect(result.edits[0].target_text).toBe('unlimited liability');
+    });
   });
 
   describe('empty response', () => {

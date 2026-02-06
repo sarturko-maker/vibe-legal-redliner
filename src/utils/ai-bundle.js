@@ -134,7 +134,7 @@ const REQUEST_FORMATS = {
       return {
         contents: [{ parts: [{ text: userPrompt }] }],
         systemInstruction: { parts: [{ text: systemMessage }] },
-        generationConfig: { temperature: 0.1, maxOutputTokens: 8192 }
+        generationConfig: { temperature: 0.1, maxOutputTokens: 65536 }
       };
     },
     extractContent(data) {
@@ -150,7 +150,7 @@ const REQUEST_FORMATS = {
           { role: 'user', content: userPrompt }
         ],
         temperature: 0.1,
-        max_tokens: 8192
+        max_tokens: 65536
       };
     },
     extractContent(data) {
@@ -290,10 +290,16 @@ async function sendRequest(config, prompt) {
 function parseAIResponse(content) {
   let cleaned = content.trim();
 
-  // Remove markdown code blocks anywhere in the response (not just at start)
+  // Remove markdown code blocks anywhere in the response
   const codeBlockMatch = cleaned.match(/```(?:json)?\s*\n?([\s\S]*?)\n?```/);
   if (codeBlockMatch) {
     cleaned = codeBlockMatch[1].trim();
+  } else {
+    // Handle unclosed code block (response truncated before closing ```)
+    const openBlockMatch = cleaned.match(/```(?:json)?\s*\n?([\s\S]+)/);
+    if (openBlockMatch) {
+      cleaned = openBlockMatch[1].trim();
+    }
   }
 
   // Try to extract JSON object
@@ -329,11 +335,14 @@ function parseAIResponse(content) {
       summary: parsed.summary || `Found ${validEdits.length} suggested changes`
     };
   } catch (e) {
-    // Include a preview of what the AI returned so the user can diagnose
+    // Detect truncation: response has opening { but unbalanced braces
+    const opens = (cleaned.match(/\{/g) || []).length;
+    const closes = (cleaned.match(/\}/g) || []).length;
+    const truncated = opens > closes;
+
     const preview = content.length > 200 ? content.substring(0, 200) + '…' : content;
-    const noClosingBrace = content.includes('{') && !content.includes('}');
-    const hint = noClosingBrace
-      ? ' The response appears truncated — try a model with a larger output limit.'
+    const hint = truncated
+      ? ' The response was cut off before completing. The document may be too complex for the current model — try a different model or simplify the playbook.'
       : ' The AI returned text instead of JSON — try again or use a different model.';
     throw new Error('Failed to parse AI response.' + hint + '\n\nAI returned: ' + preview);
   }
