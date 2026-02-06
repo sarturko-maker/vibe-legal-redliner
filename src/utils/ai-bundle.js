@@ -268,7 +268,17 @@ async function sendRequest(config, prompt) {
   const content = format.extractContent(data);
 
   if (!content) {
-    throw new Error(`No response from ${config.name}`);
+    // Gemini returns 200 but no content when safety filters block the response
+    const blockReason = data.promptFeedback?.blockReason;
+    const finishReason = data.candidates?.[0]?.finishReason;
+
+    if (blockReason) {
+      throw new Error(`${config.name} blocked the request (${blockReason}). The contract text may have triggered a safety filter. Try shortening the document or removing sensitive content.`);
+    }
+    if (finishReason && finishReason !== 'STOP') {
+      throw new Error(`${config.name} stopped generating (${finishReason}). Try a different model or shorten the document.`);
+    }
+    throw new Error(`No response from ${config.name}. The model returned an empty result — try a different model.`);
   }
 
   return parseAIResponse(content);
