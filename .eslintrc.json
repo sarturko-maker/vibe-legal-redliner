@@ -13,8 +13,7 @@
     "loadPyodide": "readonly"
   },
   "ignorePatterns": [
-    "src/lib/**",
-    "src/app-bundle.js"
+    "src/lib/**"
   ],
   "rules": {
     "no-eval": "error",
