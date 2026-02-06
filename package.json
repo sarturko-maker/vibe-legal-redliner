@@ -1,0 +1,16 @@
+{
+  "name": "vibe-legal-extension",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "lint": "eslint src/"
+  },
+  "devDependencies": {
+    "eslint": "^8.57.0",
+    "jsdom": "^26.0.0",
+    "vitest": "^3.0.0"
+  }
+}

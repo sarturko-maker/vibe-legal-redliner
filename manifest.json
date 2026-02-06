@@ -1,0 +1,39 @@
+{
+  "manifest_version": 3,
+  "name": "Vibe Legal Redliner",
+  "version": "1.0.0",
+  "description": "Redline contracts against your playbook. Powered by Adeu engine. 100% local processing.",
+  "permissions": ["storage", "offscreen", "sidePanel"],
+  "action": {
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
+  },
+  "side_panel": {
+    "default_path": "sidepanel.html"
+  },
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "background": {
+    "service_worker": "src/background.js",
+    "type": "module"
+  },
+  "content_security_policy": {
+    "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'; connect-src 'self' https://generativelanguage.googleapis.com https://openrouter.ai; trusted-types vibe-legal"
+  },
+  "host_permissions": [
+    "https://generativelanguage.googleapis.com/*",
+    "https://openrouter.ai/*"
+  ],
+  "web_accessible_resources": [{
+    "resources": ["pyodide/*", "python/*"],
+    "matches": [],
+    "extension_ids": []
+  }]
+}

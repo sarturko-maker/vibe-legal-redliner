@@ -1,0 +1,34 @@
+{
+  "env": {
+    "browser": true,
+    "es2022": true
+  },
+  "parserOptions": {
+    "ecmaVersion": 2022,
+    "sourceType": "module"
+  },
+  "globals": {
+    "chrome": "readonly",
+    "JSZip": "readonly",
+    "loadPyodide": "readonly"
+  },
+  "ignorePatterns": [
+    "src/lib/**",
+    "src/app-bundle.js"
+  ],
+  "rules": {
+    "no-eval": "error",
+    "no-implied-eval": "error",
+    "no-new-func": "error",
+    "no-script-url": "error",
+    "no-restricted-syntax": [
+      "error",
+      {
+        "selector": "AssignmentExpression[left.property.name='innerHTML']",
+        "message": "Direct innerHTML assignment is forbidden. Use safeSetHTML() from trusted-html.js."
+      }
+    ],
+    "no-undef": "error",
+    "no-unused-vars": ["warn", { "args": "none", "varsIgnorePattern": "^_" }]
+  }
+}

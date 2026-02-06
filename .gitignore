@@ -1,0 +1,13 @@
+# Dependencies
+node_modules/
+
+# Pyodide runtime (downloaded by scripts/setup.sh)
+pyodide/
+
+# Build output
+dist/
+*.zip
+
+# OS
+.DS_Store
+Thumbs.db

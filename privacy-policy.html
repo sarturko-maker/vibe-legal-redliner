@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Privacy Policy - Vibe Legal Redliner</title>
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      max-width: 800px;
+      margin: 0 auto;
+      padding: 40px 20px;
+      line-height: 1.6;
+      color: #1a1a2e;
+    }
+    h1 { color: #667eea; }
+    h2 { color: #374151; margin-top: 30px; }
+    .highlight {
+      background: #ecfdf5;
+      border-left: 4px solid #10b981;
+      padding: 16px;
+      margin: 20px 0;
+    }
+    .warning {
+      background: #fffbeb;
+      border-left: 4px solid #f59e0b;
+      padding: 16px;
+      margin: 20px 0;
+    }
+    ul, ol { padding-left: 20px; }
+    li { margin-bottom: 8px; }
+    .last-updated {
+      color: #6b7280;
+      font-size: 14px;
+    }
+  </style>
+</head>
+<body>
+  <h1>Privacy Policy</h1>
+  <p class="last-updated">Last updated: February 2026</p>
+
+  <div class="highlight">
+    <strong>TL;DR:</strong> Your .docx files never leave your browser. However, the
+    extracted contract text <strong>is sent to your chosen AI provider</strong> (Google Gemini
+    or OpenRouter) for analysis. We (the extension developer) never see, store, or have
+    access to any of your data.
+  </div>
+
+  <h2>What This Extension Does</h2>
+  <p>
+    Vibe Legal Redliner helps you redline contracts by comparing them against your playbook
+    rules using AI. The extension processes your .docx files locally in your browser, sends
+    the extracted text to an AI provider you choose, and applies the AI's suggested edits
+    as tracked changes back into the document.
+  </p>
+
+  <div class="warning">
+    <strong>Important:</strong> The plain text extracted from your contract is sent to a
+    third-party AI provider for analysis. If your documents contain sensitive or confidential
+    information, make sure you are comfortable with your chosen provider's privacy policy
+    before using this extension.
+  </div>
+
+  <h2>How Your Data Flows</h2>
+  <ol>
+    <li>You upload a .docx file. <strong>The file stays in your browser's memory</strong> and is never uploaded anywhere.</li>
+    <li>The extension extracts the plain text from the file locally using bundled libraries.</li>
+    <li><strong>The extracted text is sent directly from your browser to your chosen AI provider</strong> (Google Gemini or OpenRouter) using your own API key. We are not an intermediary &mdash; the request goes straight from your browser to the provider.</li>
+    <li>The AI provider returns suggested edits as structured data (JSON).</li>
+    <li>The extension applies those edits as tracked changes to the original .docx file, entirely locally in your browser.</li>
+    <li>You download the redlined document to your device.</li>
+  </ol>
+
+  <h2>What We Collect</h2>
+  <p><strong>Nothing.</strong></p>
+  <ul>
+    <li>We have no servers that receive your data.</li>
+    <li>We do not see your documents, your contract text, your playbooks, or your API keys.</li>
+    <li>We do not collect analytics, telemetry, usage data, or personal information of any kind.</li>
+    <li>We have no tracking pixels, cookies, or third-party scripts.</li>
+  </ul>
+
+  <h2>What Is Stored on Your Device</h2>
+  <p>The following data is stored in your browser's extension storage (on your device only):</p>
+  <ul>
+    <li><strong>API key</strong> &mdash; stored in Chrome's extension storage. You can choose "session only" mode in Settings so the key is automatically cleared when the browser closes.</li>
+    <li><strong>Preferences</strong> &mdash; your selected AI provider, model, and display preferences.</li>
+    <li><strong>Custom playbooks</strong> &mdash; any playbook rules you create.</li>
+  </ul>
+  <p>None of this data is transmitted to us or to any third party. You can clear it at any time by removing the extension.</p>
+
+  <h2>Third-Party AI Providers</h2>
+  <p>
+    When you use this extension, your contract text is sent to the AI provider you select.
+    The extension currently supports:
+  </p>
+  <ul>
+    <li><strong>Google Gemini</strong> &mdash; <a href="https://ai.google.dev/terms" target="_blank">Google's API Terms of Service</a></li>
+    <li><strong>OpenRouter</strong> &mdash; <a href="https://openrouter.ai/privacy" target="_blank">OpenRouter's Privacy Policy</a></li>
+  </ul>
+  <p>
+    You provide your own API key. The request goes directly from your browser to the
+    provider. We do not proxy, intercept, or log these requests. The provider's own
+    privacy policy and data handling practices apply to the text you send them.
+  </p>
+
+  <h2>What Stays Local</h2>
+  <ul>
+    <li>Your original .docx file (never uploaded)</li>
+    <li>The redlined output document (generated locally)</li>
+    <li>All document processing libraries (Pyodide, JSZip, python-docx) are bundled with the extension and loaded locally &mdash; no external CDNs</li>
+    <li>Your API key and preferences</li>
+  </ul>
+
+  <h2>Changes to This Policy</h2>
+  <p>
+    If we change this policy, we will update the date at the top. Material changes
+    (such as adding new third-party services) will be noted in the extension's changelog.
+  </p>
+
+  <h2>Contact</h2>
+  <p>
+    If you have questions about this privacy policy, please open an issue on our
+    GitHub repository.
+  </p>
+
+  <p style="margin-top: 30px; color: #6b7280; font-size: 14px;">
+    This extension is open source. View the source code at
+    <a href="https://github.com/sarturko-maker/vibe-legal-redliner" target="_blank">github.com/sarturko-maker/vibe-legal-redliner</a>.
+  </p>
+</body>
+</html>

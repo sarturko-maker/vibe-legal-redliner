@@ -1,0 +1,349 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Help - Vibe Legal Redliner</title>
+  <link rel="stylesheet" href="styles/design-system.css">
+  <style>
+    body {
+      max-width: 720px;
+      margin: 0 auto;
+      padding: 40px 24px 60px;
+    }
+
+    .help-header {
+      margin-bottom: 32px;
+    }
+
+    .help-header h1 {
+      font-size: 20px;
+      font-weight: var(--font-semibold);
+      color: var(--text-primary);
+      margin-bottom: 4px;
+    }
+
+    .help-header p {
+      font-size: var(--text-sm);
+      color: var(--text-secondary);
+    }
+
+    .help-section {
+      background: var(--bg-primary);
+      border: 1px solid var(--border-light);
+      border-radius: var(--radius-lg);
+      padding: 20px;
+      margin-bottom: 16px;
+    }
+
+    .help-section h2 {
+      font-size: var(--text-xs);
+      font-weight: var(--font-semibold);
+      color: var(--text-secondary);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      margin-bottom: 12px;
+    }
+
+    .help-section p {
+      font-size: var(--text-md);
+      color: var(--text-primary);
+      line-height: 1.6;
+      margin-bottom: 12px;
+    }
+
+    .help-section p:last-child {
+      margin-bottom: 0;
+    }
+
+    .help-section h3 {
+      font-size: var(--text-md);
+      font-weight: var(--font-semibold);
+      color: var(--text-primary);
+      margin: 16px 0 8px;
+    }
+
+    .help-section h3:first-of-type {
+      margin-top: 4px;
+    }
+
+    .help-section ol,
+    .help-section ul {
+      padding-left: 20px;
+      margin-bottom: 12px;
+    }
+
+    .help-section li {
+      font-size: var(--text-md);
+      color: var(--text-primary);
+      line-height: 1.6;
+      margin-bottom: 6px;
+    }
+
+    .help-section a {
+      color: var(--text-primary);
+      text-decoration: underline;
+    }
+
+    .help-section a:hover {
+      color: var(--text-secondary);
+    }
+
+    .help-tip {
+      background: var(--bg-tertiary);
+      border-radius: var(--radius-md);
+      padding: 12px 16px;
+      font-size: var(--text-sm);
+      color: var(--text-secondary);
+      line-height: 1.5;
+      margin-top: 12px;
+    }
+
+    .help-tip strong {
+      color: var(--text-primary);
+    }
+
+    .help-steps {
+      counter-reset: step;
+      list-style: none;
+      padding-left: 0;
+    }
+
+    .help-steps li {
+      counter-increment: step;
+      padding-left: 28px;
+      position: relative;
+    }
+
+    .help-steps li::before {
+      content: counter(step);
+      position: absolute;
+      left: 0;
+      top: 2px;
+      width: 20px;
+      height: 20px;
+      background: var(--bg-dark);
+      color: var(--text-inverse);
+      border-radius: 50%;
+      font-size: 11px;
+      font-weight: var(--font-semibold);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .troubleshooting-item {
+      margin-bottom: 12px;
+    }
+
+    .troubleshooting-item strong {
+      display: block;
+      font-size: var(--text-md);
+      color: var(--text-primary);
+      margin-bottom: 2px;
+    }
+
+    .troubleshooting-item p {
+      font-size: var(--text-sm);
+      color: var(--text-secondary);
+      margin-bottom: 0;
+    }
+
+    .help-footer {
+      margin-top: 32px;
+      padding-top: 16px;
+      border-top: 1px solid var(--border-light);
+      font-size: var(--text-sm);
+      color: var(--text-muted);
+      line-height: 1.6;
+    }
+
+    .help-footer a {
+      color: var(--text-secondary);
+      text-decoration: underline;
+    }
+  </style>
+</head>
+<body>
+
+  <div class="help-header">
+    <h1>Vibe Legal Redliner</h1>
+    <p>Getting started guide</p>
+  </div>
+
+  <!-- 1. What This Extension Does -->
+  <div class="help-section">
+    <h2>What This Extension Does</h2>
+    <p>
+      Vibe Legal Redliner reviews your contracts using AI and produces a Microsoft Word document
+      with tracked changes &mdash; just like a lawyer's markup. Your documents are processed
+      entirely in your browser. Only the contract text is sent to your chosen AI provider for
+      analysis.
+    </p>
+  </div>
+
+  <!-- 2. Getting Started — API Key Setup -->
+  <div class="help-section">
+    <h2>Getting Started &mdash; API Key Setup</h2>
+    <p>
+      An API key is a password that lets the extension communicate with the AI service. You need
+      one before you can analyze contracts.
+    </p>
+
+    <h3>Option A: Google Gemini (recommended to start)</h3>
+    <ol>
+      <li>Go to <a href="https://aistudio.google.com/apikey" target="_blank">aistudio.google.com</a> and sign in with your Google account.</li>
+      <li>Click "Create API key" and copy the key that appears.</li>
+      <li>In the extension, go to <strong>Settings</strong>, select <strong>Google Gemini</strong> as the provider, and paste your key into the API Key field.</li>
+      <li>Click <strong>Test Connection</strong> to confirm it works.</li>
+    </ol>
+
+    <h3>Option B: OpenRouter</h3>
+    <ol>
+      <li>Go to <a href="https://openrouter.ai/keys" target="_blank">openrouter.ai</a> and create an account.</li>
+      <li>Generate an API key from your dashboard.</li>
+      <li>In the extension, go to <strong>Settings</strong>, select <strong>OpenRouter</strong> as the provider, and paste your key.</li>
+      <li>Click <strong>Test Connection</strong> to confirm it works.</li>
+    </ol>
+
+    <div class="help-tip">
+      <strong>Remember API key toggle:</strong> When this is on (the default), your key is saved
+      between browser sessions. Turn it off if you prefer to re-enter your key each time you
+      open the browser. Either way, the extension never stores your key on any server &mdash;
+      it stays in your browser.
+    </div>
+  </div>
+
+  <!-- 3. Choosing a Model -->
+  <div class="help-section">
+    <h2>Choosing a Model</h2>
+    <p>
+      Different AI models vary in speed, quality, and cost. You can change models at any time in
+      Settings.
+    </p>
+
+    <h3>Google Gemini</h3>
+    <p>
+      The extension lists available Gemini models after you connect. Start with the default
+      selection and adjust if needed. See current options on the
+      <a href="https://ai.google.dev/pricing" target="_blank">Google AI pricing page</a>.
+    </p>
+
+    <h3>OpenRouter</h3>
+    <p>
+      OpenRouter is a gateway that gives you access to models from many providers. After
+      connecting, the extension will show available models. See the full list and pricing on the
+      <a href="https://openrouter.ai/models" target="_blank">OpenRouter models page</a>.
+    </p>
+  </div>
+
+  <!-- 4. Using Playbooks -->
+  <div class="help-section">
+    <h2>Using Playbooks</h2>
+    <p>
+      A playbook is a set of instructions that tells the AI how to review your contract. For
+      example: "review this NDA from the disclosing party's perspective" or "flag aggressive
+      liability terms in this supply agreement."
+    </p>
+    <p>
+      The extension comes with example playbooks to get you started &mdash; you can view, edit,
+      or delete these at any time.
+    </p>
+
+    <h3>Creating your own playbook</h3>
+    <ol>
+      <li>Go to the <strong>Playbooks</strong> page and click <strong>+ New Playbook</strong>.</li>
+      <li>Give it a name and a short description.</li>
+      <li>Write your review instructions in the rules field.</li>
+      <li>Click <strong>Save Changes</strong>, then <strong>Use for Review</strong> to make it active.</li>
+    </ol>
+
+    <div class="help-tip">
+      <strong>Tip:</strong> The more specific your playbook, the better the results. Include
+      which party you represent, your negotiating position, and what terms matter most to you.
+      For example, instead of "review this contract," try "review this SaaS agreement from the
+      customer's perspective, flag any limitation of liability below 12 months of fees, and
+      ensure data deletion is required within 30 days of termination."
+    </div>
+  </div>
+
+  <!-- 5. Processing a Contract -->
+  <div class="help-section">
+    <h2>Processing a Contract</h2>
+    <ol class="help-steps">
+      <li>Select or create a playbook that matches your review needs.</li>
+      <li>Upload a <strong>.docx</strong> file (Microsoft Word document) by clicking the upload area or dragging the file in.</li>
+      <li>Click <strong>Analyze &amp; Redline</strong>. The extension extracts the text, sends it to the AI, and generates tracked changes.</li>
+      <li>When processing is complete, click <strong>Download Redlined Document</strong>.</li>
+      <li>Open the downloaded file in Microsoft Word. You'll see tracked changes that you can accept or reject, just like a normal legal markup.</li>
+    </ol>
+
+    <div class="help-tip">
+      <strong>Note:</strong> Processing time depends on document length and the AI model.
+      Typical contracts take 30&ndash;60 seconds. The AI analysis step is usually the longest
+      part.
+    </div>
+  </div>
+
+  <!-- 6. Privacy & Security -->
+  <div class="help-section">
+    <h2>Privacy &amp; Security</h2>
+    <ul>
+      <li>Documents are processed in your browser using WebAssembly &mdash; your files are never uploaded to any server.</li>
+      <li>Contract text (not the file itself) is sent to your chosen AI provider for analysis.</li>
+      <li>API keys are stored locally in your browser and never transmitted to us.</li>
+      <li>There are no analytics, no tracking, and no accounts.</li>
+    </ul>
+    <p>
+      Read the full <a href="privacy-policy.html" target="_blank">Privacy Policy</a> for more details.
+    </p>
+  </div>
+
+  <!-- 7. Troubleshooting -->
+  <div class="help-section">
+    <h2>Troubleshooting</h2>
+
+    <div class="troubleshooting-item">
+      <strong>"API key invalid"</strong>
+      <p>
+        Double-check that you copied the full key with no extra spaces. Make sure it hasn't
+        expired, and verify you selected the correct provider (Gemini vs. OpenRouter) in
+        Settings.
+      </p>
+    </div>
+
+    <div class="troubleshooting-item">
+      <strong>"Processing seems stuck"</strong>
+      <p>
+        Large documents can take up to 2 minutes. The AI analysis step is usually the longest
+        part &mdash; the progress bar will update as each phase completes.
+      </p>
+    </div>
+
+    <div class="troubleshooting-item">
+      <strong>"Downloaded file won't open"</strong>
+      <p>
+        Make sure you open the file with Microsoft Word. Google Docs and LibreOffice may not
+        display tracked changes correctly.
+      </p>
+    </div>
+
+    <div class="troubleshooting-item">
+      <strong>"No changes in the output"</strong>
+      <p>
+        Check that your playbook instructions are specific enough. Try one of the example
+        playbooks first to confirm the extension is working, then adjust your custom playbook.
+      </p>
+    </div>
+  </div>
+
+  <!-- 8. Footer -->
+  <div class="help-footer">
+    v1.0.0 &middot;
+    <a href="https://github.com/sarturko-maker/vibe-legal-redliner" target="_blank">Source code on GitHub</a> &middot;
+    <a href="privacy-policy.html" target="_blank">Privacy Policy</a><br>
+    Built with Pyodide and the Adeu engine.
+  </div>
+
+</body>
+</html>

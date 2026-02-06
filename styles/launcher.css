@@ -1,0 +1,147 @@
+/* ============================================
+   LAUNCHER POPUP STYLES
+   Simple mode selection interface
+   ============================================ */
+
+body {
+  width: 280px;
+  min-height: auto;
+  padding: 0;
+}
+
+.launcher {
+  padding: var(--space-5);
+}
+
+.launcher-header {
+  text-align: center;
+  margin-bottom: var(--space-5);
+}
+
+.launcher-logo {
+  width: 48px;
+  height: 48px;
+  background: var(--bg-dark);
+  color: var(--text-inverse);
+  border-radius: var(--radius-lg);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: var(--font-semibold);
+  font-size: var(--text-lg);
+  margin: 0 auto var(--space-3);
+}
+
+.launcher-title {
+  font-size: var(--text-lg);
+  font-weight: var(--font-semibold);
+  color: var(--text-primary);
+  margin-bottom: var(--space-1);
+}
+
+.launcher-subtitle {
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+}
+
+.launcher-options {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  margin-bottom: var(--space-4);
+}
+
+.launcher-option {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-4);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-lg);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  background: var(--bg-primary);
+}
+
+.launcher-option:hover {
+  border-color: var(--neutral-400);
+  background: var(--bg-secondary);
+}
+
+.launcher-option:active {
+  transform: scale(0.98);
+}
+
+.launcher-option-icon {
+  width: 40px;
+  height: 40px;
+  background: var(--bg-tertiary);
+  border-radius: var(--radius-md);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 18px;
+  flex-shrink: 0;
+}
+
+.launcher-option-text {
+  flex: 1;
+}
+
+.launcher-option-title {
+  font-size: var(--text-base);
+  font-weight: var(--font-medium);
+  color: var(--text-primary);
+  margin-bottom: 2px;
+}
+
+.launcher-option-desc {
+  font-size: var(--text-xs);
+  color: var(--text-secondary);
+}
+
+.launcher-remember {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.launcher-remember input {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--bg-dark);
+}
+
+.launcher-footer {
+  margin-top: var(--space-4);
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--border-light);
+  text-align: center;
+}
+
+.launcher-status {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+}
+
+.launcher-status.ready {
+  color: var(--accent-green);
+}
+
+.launcher-status .status-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.launcher-status .status-dot.pulse {
+  animation: pulse 1.5s ease-in-out infinite;
+}

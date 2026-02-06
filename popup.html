@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Vibe Legal</title>
+  <link rel="stylesheet" href="styles/design-system.css">
+  <link rel="stylesheet" href="styles/launcher.css">
+</head>
+<body>
+  <div class="launcher">
+    <div class="launcher-header">
+      <div class="launcher-logo">VL</div>
+      <div class="launcher-title">Vibe Legal</div>
+      <div class="launcher-subtitle">Contract Redliner</div>
+    </div>
+
+    <div class="launcher-options">
+      <div class="launcher-option" id="open-sidepanel">
+        <div class="launcher-option-icon">&#9776;</div>
+        <div class="launcher-option-text">
+          <div class="launcher-option-title">Side Panel</div>
+          <div class="launcher-option-desc">Opens alongside your browser</div>
+        </div>
+      </div>
+
+      <div class="launcher-option" id="open-fullscreen">
+        <div class="launcher-option-icon">&#9635;</div>
+        <div class="launcher-option-text">
+          <div class="launcher-option-title">Full Screen</div>
+          <div class="launcher-option-desc">Opens in a new tab</div>
+        </div>
+      </div>
+    </div>
+
+    <label class="launcher-remember">
+      <input type="checkbox" id="remember-choice">
+      Remember my choice
+    </label>
+
+    <div class="launcher-footer">
+      <div class="launcher-status" id="engine-status">
+        <span class="status-dot"></span>
+        <span>Engine loads on first use</span>
+      </div>
+    </div>
+  </div>
+
+  <script type="module" src="src/launcher.js"></script>
+</body>
+</html>
