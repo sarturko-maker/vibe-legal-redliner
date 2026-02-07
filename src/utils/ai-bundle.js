@@ -103,6 +103,18 @@ Return a JSON object with this exact structure:
   "comment": "Removing non-challenge provision - not acceptable per playbook"
 }
 
+## CriticMarkup — Document Revision History
+
+The contract text may contain CriticMarkup showing tracked changes from prior negotiation rounds:
+- {--deleted text--} — text that was deleted in a previous round
+- {++inserted text++} — text that was inserted in a previous round
+- {>>comment text<<} — a reviewer comment attached to nearby text
+
+Consider this revision history when analyzing the contract. It provides context about what has already been negotiated and changed. However:
+- Do NOT use CriticMarkup syntax in your target_text or new_text values
+- When quoting text in target_text, include the CriticMarkup markers exactly as they appear
+- Your new_text should contain plain text only (no CriticMarkup wrappers)
+
 ## Important Notes
 - If no changes are needed, return: {"edits": [], "summary": "No changes required based on playbook analysis"}
 - Quality over quantity - fewer precise edits are better than many vague ones

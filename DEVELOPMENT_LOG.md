@@ -181,7 +181,7 @@ Entries are grouped by priority:
   - `src/config.js` — added `export` to `DEFAULT_PLAYBOOKS`, `AI_PROVIDERS`, `JOB_STATUS`
   - `src/utils/ai-bundle.js` — added `export` to `analyzeContract`, `testConnection`
   - `src/state.js` — NEW: state object, `loadSettings`, `saveSettings`, audit log functions
-  - `src/file-processing.js` — NEW: file constants, `extractTextFromDocx`, `isValidZipFile`, `formatFileSize`, `downloadFile`
+  - `src/file-processing.js` — NEW: file constants, `extractTextFromDocx` (later removed in ADR-025), `isValidZipFile`, `formatFileSize`, `downloadFile`
   - `src/ui.js` — NEW: `escapeHtml`, `render`, all `render*` functions, `closeModal`
   - `src/api-handler.js` — NEW: `handleTestConnection`
   - `src/app.js` — NEW: entry point with `initEngine`, `processDocument`, `processBatch`, event handlers, `init`
@@ -262,7 +262,7 @@ Entries are grouped by priority:
 
 ### ADR-020: Lazy-load Pyodide on demand
 
-- **Status:** DONE
+- **Status:** SUPERSEDED by ADR-025
 - **Issue:** Pyodide loads ~27MB into memory on every browser session at extension startup. The offscreen document persists for the lifetime of the session, creating a permanent resource cost even when the extension is not actively in use.
 - **Decision:** Defer offscreen document creation (and thus Pyodide initialization) until the user actually triggers document processing. Engine init runs in parallel with AI analysis so users rarely see extra wait time.
 - **Rationale:** AI analysis takes 20-60s while Pyodide init takes ~10-15s. By starting both concurrently, the engine is typically ready before it's needed. The offscreen document is only created on first use and transparently re-created if Chrome destroys it. A 60-second timeout protects against initialization hangs.
@@ -316,3 +316,19 @@ Entries are grouped by priority:
   - `vibe-legal-extension/scripts/package.sh` (new) — create distribution zip
   - `README.md` (new) — project documentation
 - **Date Resolved:** 2026-02-06
+
+---
+
+### ADR-025: Eliminate JS text extraction — use Adeu's full pipeline
+
+- **Status:** DONE (supersedes ADR-020)
+- **Issue:** The JS `extractTextFromDocx` in `file-processing.js` (~320 lines) duplicated Adeu's `ingest.py` text extraction logic, creating format drift risk. A prior bug (mismatched formatting markers) was caused by this duplication. The JS layer also used "clean view" which hid tracked changes from prior negotiation rounds, preventing the AI from seeing document revision history.
+- **Decision:** Removed all JS text extraction code. Text extraction now goes through Adeu's `extract_text_from_stream()` via the offscreen document. The new message protocol is: (1) UI sends `extract-text` to background, which forwards as `extract` to offscreen — Adeu extracts text and offscreen stores the document bytes. (2) After AI analysis, UI sends `apply-edits` to background, which forwards as `apply` to offscreen — Adeu applies edits using the stored bytes (with a fallback to bytes sent in the message if the service worker restarted). Pyodide now initialises eagerly when the UI opens (reversing the lazy-load approach from ADR-020) because text extraction requires the engine to be ready before AI analysis can begin. The AI prompt was updated with a CriticMarkup awareness section explaining `{--del--}`, `{++ins++}`, `{>>comment<<}` syntax so the AI understands document revision history. Playbook creation uses `clean_view=true` to get clean text without revision markers.
+- **Rationale:** A single source of truth for text extraction eliminates format drift bugs entirely. Using `clean_view=false` (the default) gives the AI full visibility into tracked changes from prior negotiation rounds, enabling smarter edit suggestions that account for what has already been negotiated. Eager engine init is acceptable because (a) the user opened the extension intending to process documents, and (b) the engine must be ready before text extraction can start (unlike the old flow where JS extraction could run in parallel with engine init).
+- **Files Changed:**
+  - `src/offscreen.js` — added `storedDocxBytes`, Python `extract_text()` wrapper, JS `extractText()` function, `extract` and `apply` message handlers; removed `redline` handler
+  - `src/background.js` — added `extract-text` and `apply-edits` forwarding handlers; removed `process-redline` handler
+  - `src/app.js` — added `sendMsg()` helper; rewrote `processDocument()`, `processBatch()`, `createPlaybook()` to use `extract-text`/`apply-edits`; eager engine init in `init()`; removed `extractTextFromDocx` import
+  - `src/file-processing.js` — deleted ~320 lines of extraction code and test-only exports; kept constants, `formatFileSize`, `isValidZipFile`, `downloadFile`
+  - `src/utils/ai-bundle.js` — added CriticMarkup explanation section to AI system prompt
+- **Date Resolved:** 2026-02-07

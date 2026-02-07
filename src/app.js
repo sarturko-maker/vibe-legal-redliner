@@ -8,7 +8,7 @@ import { AI_PROVIDERS, JOB_STATUS } from './config.js';
 import { render, closeModal } from './ui.js';
 import { safeSetHTML } from './trusted-html.js';
 import { handleTestConnection } from './api-handler.js';
-import { extractTextFromDocx, isValidZipFile, MAX_FILE_SIZE, MAX_TEXT_LENGTH, MAX_BATCH_FILES, downloadFile } from './file-processing.js';
+import { isValidZipFile, MAX_FILE_SIZE, MAX_TEXT_LENGTH, MAX_BATCH_FILES, downloadFile } from './file-processing.js';
 import { analyzeContract } from './utils/ai-bundle.js';
 
 // ============================================================================
@@ -56,6 +56,21 @@ function ensureEngineReady() {
   return engineInitPromise;
 }
 
+/**
+ * Send a message to the background service worker and return a promise.
+ */
+function sendMsg(msg) {
+  return new Promise((resolve, reject) => {
+    chrome.runtime.sendMessage(msg, (response) => {
+      if (chrome.runtime.lastError) {
+        reject(new Error('Communication error with background service. Please reload the extension.'));
+        return;
+      }
+      resolve(response);
+    });
+  });
+}
+
 // ============================================================================
 // DOCUMENT PROCESSING
 // ============================================================================
@@ -91,7 +106,7 @@ async function processDocument() {
     id: Date.now().toString(),
     status: JOB_STATUS.PROCESSING,
     progress: 5,
-    current_phase: 'Reading document...',
+    current_phase: 'Initialising engine...',
     operations_complete: 0,
     operations_total: 0,
     errors: []
@@ -99,22 +114,34 @@ async function processDocument() {
   state.review.result = null;
   render();
 
-  // Start engine init in parallel with file reading + AI analysis
-  const engineReady = ensureEngineReady();
-
   try {
-    // Read file
+    // Read file bytes
     const arrayBuffer = await file.arrayBuffer();
     const contractBytes = new Uint8Array(arrayBuffer);
 
-    // Validate DOCX file structure
     if (!isValidZipFile(contractBytes)) {
       throw new Error('Invalid file format. Please upload a valid .docx file.');
     }
 
-    const contractText = await extractTextFromDocx(arrayBuffer);
+    // Ensure engine is ready before extracting text
+    await ensureEngineReady();
 
-    // Validate extracted text
+    state.review.job.progress = 10;
+    state.review.job.current_phase = 'Reading document...';
+    render();
+
+    // Extract text via Adeu (clean_view=false → includes CriticMarkup)
+    const extractResp = await sendMsg({
+      type: 'extract-text',
+      contractBytes: Array.from(contractBytes)
+    });
+
+    if (!extractResp || !extractResp.success) {
+      throw new Error(extractResp?.error || 'Failed to extract text from document.');
+    }
+
+    const contractText = extractResp.text;
+
     if (!contractText || contractText.trim().length === 0) {
       throw new Error('Document appears to be empty. Please upload a document with text content.');
     }
@@ -155,67 +182,49 @@ async function processDocument() {
       return;
     }
 
-    // Wait for engine if AI finished first
-    if (!state.pyodideReady) {
-      state.review.job.current_phase = 'Initialising engine...';
-      render();
-      await engineReady;
-    }
-
-    // Send to background service worker -> offscreen document
+    state.review.job.progress = 80;
     state.review.job.current_phase = 'Applying track changes...';
     render();
 
-    state.review.job.progress = 80;
-    render();
-
-    chrome.runtime.sendMessage({
-      type: 'process-redline',
+    // Apply edits via Adeu (bytes already stored in offscreen from extract)
+    const applyResp = await sendMsg({
+      type: 'apply-edits',
       contractBytes: Array.from(contractBytes),
       edits: aiResponse.edits
-    }, (response) => {
-      // Check for Chrome runtime errors
-      if (chrome.runtime.lastError) {
-        state.review.job.status = JOB_STATUS.ERROR;
-        state.review.job.errors = ['Communication error with background service. Please reload the extension.'];
-        writeAuditLogEntry({ filename: file.name, fileSizeBytes: file.size, provider: state.settings.provider, model: state.settings.model, editsReturned: aiResponse.edits.length, status: 'error' });
-        render();
-        return;
-      }
-
-      if (response && response.success) {
-        state.review.result = new Uint8Array(response.result);
-        state.review.job.status = JOB_STATUS.COMPLETE;
-        state.review.job.progress = 100;
-        const applied = response.applied ?? aiResponse.edits.length;
-        const skipped = response.skipped ?? 0;
-        state.review.job.operations_complete = applied;
-        // Merge per-edit statuses into stored edits
-        if (response.statuses && state.review.edits) {
-          state.review.edits = state.review.edits.map((edit, i) => ({
-            ...edit,
-            applied: response.statuses[i] ?? false
-          }));
-        }
-        if (skipped > 0) {
-          state.review.job.current_phase = `Complete — ${applied} of ${applied + skipped} edits applied (${skipped} could not be matched in the document)`;
-        } else {
-          state.review.job.current_phase = `Complete — ${applied} edits applied`;
-        }
-        writeAuditLogEntry({ filename: file.name, fileSizeBytes: file.size, provider: state.settings.provider, model: state.settings.model, editsReturned: aiResponse.edits.length, editsApplied: applied, editsSkipped: skipped, status: 'success' });
-      } else {
-        state.review.job.status = JOB_STATUS.ERROR;
-        // Sanitize error message to avoid leaking internal details
-        state.review.job.errors = ['Document processing failed. Please try again.'];
-        writeAuditLogEntry({ filename: file.name, fileSizeBytes: file.size, provider: state.settings.provider, model: state.settings.model, editsReturned: aiResponse.edits.length, status: 'error' });
-      }
-      render();
     });
+
+    if (!applyResp || !applyResp.success) {
+      state.review.job.status = JOB_STATUS.ERROR;
+      state.review.job.errors = ['Document processing failed. Please try again.'];
+      writeAuditLogEntry({ filename: file.name, fileSizeBytes: file.size, provider: state.settings.provider, model: state.settings.model, editsReturned: aiResponse.edits.length, status: 'error' });
+      render();
+      return;
+    }
+
+    state.review.result = new Uint8Array(applyResp.result);
+    state.review.job.status = JOB_STATUS.COMPLETE;
+    state.review.job.progress = 100;
+    const applied = applyResp.applied ?? aiResponse.edits.length;
+    const skipped = applyResp.skipped ?? 0;
+    state.review.job.operations_complete = applied;
+
+    if (applyResp.statuses && state.review.edits) {
+      state.review.edits = state.review.edits.map((edit, i) => ({
+        ...edit,
+        applied: applyResp.statuses[i] ?? false
+      }));
+    }
+
+    if (skipped > 0) {
+      state.review.job.current_phase = `Complete — ${applied} of ${applied + skipped} edits applied (${skipped} could not be matched in the document)`;
+    } else {
+      state.review.job.current_phase = `Complete — ${applied} edits applied`;
+    }
+    writeAuditLogEntry({ filename: file.name, fileSizeBytes: file.size, provider: state.settings.provider, model: state.settings.model, editsReturned: aiResponse.edits.length, editsApplied: applied, editsSkipped: skipped, status: 'success' });
+    render();
 
   } catch (error) {
     state.review.job.status = JOB_STATUS.ERROR;
-    // All errors thrown within the try block are user-facing.
-    // Only suppress truly unexpected errors (e.g. TypeError from a coding bug).
     let userMessage;
     if (error.message && !(error instanceof TypeError) && !(error instanceof ReferenceError)) {
       userMessage = error.message;
@@ -256,9 +265,6 @@ async function processBatch() {
 
   state.batch.isProcessing = true;
 
-  // Start engine init in parallel with processing
-  const engineReady = ensureEngineReady();
-
   // Initialize all jobs as queued
   state.batch.jobs = files.map((file, i) => ({
     id: Date.now().toString() + '-' + i,
@@ -272,6 +278,20 @@ async function processBatch() {
     error: null
   }));
   render();
+
+  // Ensure engine is ready before processing any files
+  try {
+    await ensureEngineReady();
+  } catch (err) {
+    // Mark all jobs as error
+    for (const job of state.batch.jobs) {
+      job.status = JOB_STATUS.ERROR;
+      job.error = err.message || 'Engine failed to initialise.';
+    }
+    state.batch.isProcessing = false;
+    render();
+    return;
+  }
 
   // Process sequentially
   for (let i = 0; i < files.length; i++) {
@@ -291,7 +311,17 @@ async function processBatch() {
         throw new Error('Invalid file format. Please upload a valid .docx file.');
       }
 
-      const contractText = await extractTextFromDocx(arrayBuffer);
+      // Extract text via Adeu
+      const extractResp = await sendMsg({
+        type: 'extract-text',
+        contractBytes: Array.from(contractBytes)
+      });
+
+      if (!extractResp || !extractResp.success) {
+        throw new Error(extractResp?.error || 'Failed to extract text from document.');
+      }
+
+      const contractText = extractResp.text;
 
       if (!contractText || contractText.trim().length === 0) {
         throw new Error('Document appears to be empty.');
@@ -327,38 +357,23 @@ async function processBatch() {
         continue;
       }
 
-      // Wait for engine if AI finished first
-      if (!state.pyodideReady) {
-        job.phase = 'Initialising engine...';
-        render();
-        await engineReady;
-      }
-
       job.progress = 80;
       job.phase = 'Applying track changes...';
       render();
 
-      // Wrap the chrome.runtime.sendMessage callback in a Promise
-      const response = await new Promise((resolve, reject) => {
-        chrome.runtime.sendMessage({
-          type: 'process-redline',
-          contractBytes: Array.from(contractBytes),
-          edits: aiResponse.edits
-        }, (resp) => {
-          if (chrome.runtime.lastError) {
-            reject(new Error('Communication error with background service.'));
-            return;
-          }
-          resolve(resp);
-        });
+      // Apply edits via Adeu
+      const applyResp = await sendMsg({
+        type: 'apply-edits',
+        contractBytes: Array.from(contractBytes),
+        edits: aiResponse.edits
       });
 
-      if (response && response.success) {
-        job.result = new Uint8Array(response.result);
+      if (applyResp && applyResp.success) {
+        job.result = new Uint8Array(applyResp.result);
         job.status = JOB_STATUS.COMPLETE;
         job.progress = 100;
-        const applied = response.applied ?? job.editCount;
-        const skipped = response.skipped ?? 0;
+        const applied = applyResp.applied ?? job.editCount;
+        const skipped = applyResp.skipped ?? 0;
         if (skipped > 0) {
           job.phase = `Complete — ${applied}/${applied + skipped} applied`;
         } else {
@@ -366,7 +381,7 @@ async function processBatch() {
         }
         writeAuditLogEntry({ filename: file.name, fileSizeBytes: file.size, provider: state.settings.provider, model: state.settings.model, editsReturned: job.editCount, editsApplied: applied, editsSkipped: skipped, status: 'success' });
       } else {
-        throw new Error(response?.error || 'Document processing failed.');
+        throw new Error(applyResp?.error || 'Document processing failed.');
       }
 
     } catch (error) {
@@ -469,7 +484,16 @@ async function createPlaybook(name, description, fileContent) {
 
   if (fileContent) {
     try {
-      playbookText = await extractTextFromDocx(fileContent);
+      await ensureEngineReady();
+      const bytes = new Uint8Array(fileContent);
+      const resp = await sendMsg({
+        type: 'extract-text',
+        contractBytes: Array.from(bytes),
+        cleanView: true
+      });
+      if (resp && resp.success && resp.text) {
+        playbookText = resp.text;
+      }
     } catch (e) {
       // Fall back to description if extraction fails
       playbookText = description || `Custom playbook: ${name}`;
@@ -839,13 +863,9 @@ async function init() {
     }
   });
 
-  // Check if engine is already ready (e.g. initialized by another tab)
-  chrome.runtime.sendMessage({ type: 'check-engine-status' }, (response) => {
-    if (chrome.runtime.lastError) return;
-    if (response && response.ready) {
-      state.pyodideReady = true;
-      render();
-    }
+  // Eagerly start engine init so it's ready by the time user uploads a file
+  ensureEngineReady().catch(() => {
+    // Silently swallow — will retry when user triggers processing
   });
 
   // Event listeners

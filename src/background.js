@@ -146,15 +146,31 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
 
-  // Handle redline request from popup
-  if (message.type === 'process-redline') {
+  // Handle text extraction request
+  if (message.type === 'extract-text') {
     ensureOffscreenDocument().then(async () => {
       try {
-        // Defense-in-depth: ensure engine is ready before forwarding
         await waitForPyodideReady();
-        // Forward to offscreen document
         const response = await chrome.runtime.sendMessage({
-          type: 'redline',
+          type: 'extract',
+          contractBytes: message.contractBytes,
+          cleanView: message.cleanView
+        });
+        sendResponse(response);
+      } catch (error) {
+        sendResponse({ success: false, error: error.message });
+      }
+    });
+    return true;
+  }
+
+  // Handle apply-edits request
+  if (message.type === 'apply-edits') {
+    ensureOffscreenDocument().then(async () => {
+      try {
+        await waitForPyodideReady();
+        const response = await chrome.runtime.sendMessage({
+          type: 'apply',
           contractBytes: message.contractBytes,
           edits: message.edits
         });

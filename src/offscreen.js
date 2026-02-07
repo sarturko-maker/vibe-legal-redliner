@@ -5,6 +5,7 @@
 
 let pyodide = null;
 let ready = false;
+let storedDocxBytes = null;
 
 /**
  * Load Adeu Python source files into Pyodide's virtual filesystem
@@ -107,8 +108,16 @@ import json
 from io import BytesIO
 from adeu.models import DocumentEdit
 from adeu.redline.engine import RedlineEngine
+from adeu.ingest import extract_text_from_stream
 from docx.oxml.ns import qn
 from docx.oxml import OxmlElement
+
+def extract_text(docx_bytes: bytes, clean_view: bool = False) -> str:
+    stream = BytesIO(docx_bytes)
+    try:
+        return extract_text_from_stream(stream, clean_view=clean_view)
+    finally:
+        stream.close()
 
 def enable_track_changes(doc):
     """
@@ -322,6 +331,37 @@ except NameError:
   return { outputBytes, applied, skipped, statuses };
 }
 
+/**
+ * Extract text from a DOCX using Adeu's Python pipeline
+ */
+async function extractText(contractBytes, cleanView) {
+  if (!ready) {
+    throw new Error('Pyodide not ready');
+  }
+
+  pyodide.globals.set('js_extract_bytes', contractBytes);
+  pyodide.globals.set('js_clean_view', cleanView);
+
+  const result = await pyodide.runPythonAsync(`
+doc_bytes = bytes(js_extract_bytes.to_py())
+extract_text(doc_bytes, clean_view=js_clean_view)
+  `);
+
+  const text = result;
+
+  // Cleanup
+  pyodide.globals.delete('js_extract_bytes');
+  pyodide.globals.delete('js_clean_view');
+  await pyodide.runPythonAsync(`
+try:
+    del doc_bytes
+except NameError:
+    pass
+  `);
+
+  return text;
+}
+
 // Listen for messages from the service worker or popup
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.type === 'ping') {
@@ -329,23 +369,46 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
 
-  if (message.type === 'redline') {
-    const { contractBytes, edits } = message;
+  if (message.type === 'extract') {
+    const bytes = new Uint8Array(message.contractBytes);
+    const cleanView = message.cleanView ?? false;
 
-    processDocument(new Uint8Array(contractBytes), JSON.stringify(edits))
+    // Store bytes for subsequent apply call
+    storedDocxBytes = bytes;
+
+    extractText(bytes, cleanView)
+      .then(text => {
+        sendResponse({ success: true, text });
+      })
+      .catch(error => {
+        sendResponse({ success: false, error: error.message || 'Text extraction failed' });
+      });
+
+    return true;
+  }
+
+  if (message.type === 'apply') {
+    // Prefer stored bytes; fall back to bytes sent in the message
+    const bytes = storedDocxBytes || (message.contractBytes ? new Uint8Array(message.contractBytes) : null);
+
+    if (!bytes) {
+      sendResponse({ success: false, error: 'No document bytes available' });
+      return true;
+    }
+
+    processDocument(bytes, JSON.stringify(message.edits))
       .then(({ outputBytes, applied, skipped, statuses }) => {
-        // Array.from() copies the bytes into the response; null the
-        // Uint8Array immediately so it can be GC'd without waiting
-        // for the callback scope to unwind.
         const response = Array.from(outputBytes);
         outputBytes = null;
+        // Null stored bytes after successful apply
+        storedDocxBytes = null;
         sendResponse({ success: true, result: response, applied, skipped, statuses });
       })
       .catch(error => {
         sendResponse({ success: false, error: error.message || 'Document processing failed' });
       });
 
-    return true; // Keep channel open for async response
+    return true;
   }
 
   return false;
