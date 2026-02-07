@@ -52,13 +52,15 @@ Return a JSON object with this exact structure:
 ### Finding Text (target_text)
 - Must be an EXACT quote from the document - copy/paste precision
 - Include enough context to be unique (usually 5-15 words)
-- Don't include paragraph numbers or formatting markers
+- Copy text exactly as it appears, including any **bold** or _italic_ markers
+- Don't include paragraph numbers like "1." or "a)"
 - If text appears multiple times, include surrounding words to disambiguate
 
 ### Replacement Text (new_text)
 - For modifications: provide the complete replacement text
 - For deletions: use empty string ""
 - For insertions at a location: include anchor text + new content
+- Do NOT include ** or _ markers — formatting is preserved automatically
 - Preserve the original style and tone of the document
 
 ### Comments
