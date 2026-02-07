@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Vibe Legal Redliner",
   "version": "1.0.0",
-  "description": "Redline contracts against your playbook. Powered by Adeu engine. 100% local processing.",
+  "description": "Redline contracts against your playbook using AI. Bring your own API key.",
   "permissions": ["storage", "offscreen", "sidePanel"],
   "action": {
     "default_popup": "popup.html",
