@@ -72,10 +72,26 @@ export function render() {
 
       <!-- Main Content -->
       <main class="main-content">
+        ${!state.disclaimerAcknowledged ? renderDisclaimerBanner() : ''}
         ${renderPage()}
       </main>
     </div>
   `);
+}
+
+function renderDisclaimerBanner() {
+  return `
+    <div class="disclaimer-banner">
+      <div class="disclaimer-banner-text">
+        <strong>Important:</strong> This tool is a work in progress, built using AI-assisted development.
+        It does not provide legal advice. All output is AI-generated and must be reviewed by a qualified
+        professional before use. AI models can produce inaccurate results. Your document text is sent to
+        your chosen AI provider.
+        <a href="disclaimer.html" target="_blank">Learn more</a>
+      </div>
+      <button class="disclaimer-banner-close" data-action="dismiss-disclaimer" title="Dismiss">&times;</button>
+    </div>
+  `;
 }
 
 function renderPage() {
@@ -599,6 +615,7 @@ function renderSettingsPage() {
         </p>
         <p class="about-text">
           <a href="help.html" target="_blank">Getting Started</a> &middot;
+          <a href="disclaimer.html" target="_blank">Disclaimer</a> &middot;
           <a href="privacy-policy.html" target="_blank">Privacy Policy</a>
         </p>
       </div>

@@ -2,6 +2,10 @@
 
 100% client-side contract redlining Chrome extension. Your .docx files never leave your browser — extracted text is sent to your chosen AI provider for analysis.
 
+## Disclaimer
+
+> **This tool is a work in progress, built using AI-assisted development. It does not provide legal advice. All output is AI-generated and must be reviewed by a qualified professional before use. AI models can produce inaccurate results. Your document text is sent to your chosen AI provider.** See the full [Disclaimer](DISCLAIMER.md) and [Privacy Policy](privacy-policy.html).
+
 ## What It Does
 
 - Upload a .docx contract and a playbook describing your review position
@@ -49,6 +53,7 @@ Chrome Manifest V3 extension. Document processing runs client-side via [Pyodide]
 
 ## Documentation
 
+- [DISCLAIMER.md](DISCLAIMER.md) — important disclaimers and limitations
 - [SECURITY.md](SECURITY.md) — threat model, self-review findings, vulnerability reporting
 - [CONTRIBUTING.md](CONTRIBUTING.md) — how to contribute
 - [SBOM.md](SBOM.md) — software bill of materials with SHA-256 hashes

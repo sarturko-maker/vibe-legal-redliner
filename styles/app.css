@@ -999,3 +999,49 @@
   color: var(--text-secondary);
   font-style: italic;
 }
+
+/* === Disclaimer Banner === */
+.disclaimer-banner {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  background: #fffbeb;
+  border-bottom: 1px solid #f59e0b;
+  font-size: var(--text-sm);
+  line-height: 1.5;
+  color: var(--text-primary);
+}
+
+.disclaimer-banner-text {
+  flex: 1;
+}
+
+.disclaimer-banner-text strong {
+  font-weight: var(--font-semibold);
+}
+
+.disclaimer-banner-text a {
+  color: var(--text-secondary);
+  text-decoration: underline;
+  margin-left: 2px;
+}
+
+.disclaimer-banner-text a:hover {
+  color: var(--text-primary);
+}
+
+.disclaimer-banner-close {
+  background: none;
+  border: none;
+  font-size: 18px;
+  cursor: pointer;
+  color: var(--text-muted);
+  padding: 0 var(--space-1);
+  flex-shrink: 0;
+  line-height: 1;
+}
+
+.disclaimer-banner-close:hover {
+  color: var(--text-primary);
+}

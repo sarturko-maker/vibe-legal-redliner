@@ -739,6 +739,12 @@ function handleClick(e) {
         render();
       }
       break;
+
+    case 'dismiss-disclaimer':
+      state.disclaimerAcknowledged = true;
+      chrome.storage.local.set({ disclaimerAcknowledged: true });
+      render();
+      break;
   }
 }
 

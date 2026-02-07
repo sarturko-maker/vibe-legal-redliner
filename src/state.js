@@ -46,6 +46,9 @@ export const state = {
   isTestingConnection: false,
   rememberApiKey: true,
 
+  // Disclaimer
+  disclaimerAcknowledged: false,
+
   // Audit log
   auditLog: [],
   auditRetentionDays: 30
@@ -57,7 +60,7 @@ export const state = {
 
 export async function loadSettings() {
   return new Promise((resolve) => {
-    chrome.storage.local.get(['settings', 'playbooks', 'customPlaybooks', 'rememberApiKey', 'auditLog', 'auditRetentionDays'], (result) => {
+    chrome.storage.local.get(['settings', 'playbooks', 'customPlaybooks', 'rememberApiKey', 'auditLog', 'auditRetentionDays', 'disclaimerAcknowledged'], (result) => {
       if (result.settings) {
         state.settings = { ...state.settings, ...result.settings };
       }
@@ -81,6 +84,7 @@ export async function loadSettings() {
         state.selectedPlaybookId = state.playbooks[0].id;
       }
 
+      state.disclaimerAcknowledged = result.disclaimerAcknowledged === true;
       state.rememberApiKey = result.rememberApiKey !== false;
       if (Array.isArray(result.auditLog)) {
         state.auditLog = result.auditLog;
