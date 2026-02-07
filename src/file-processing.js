@@ -1,14 +1,5 @@
-/**
- * File handling utilities
- */
-
-// Maximum file size: 50MB
 export const MAX_FILE_SIZE = 50 * 1024 * 1024;
-
-// Maximum text length to send to AI: 500KB
 export const MAX_TEXT_LENGTH = 500 * 1024;
-
-// Maximum batch files
 export const MAX_BATCH_FILES = 5;
 
 export function formatFileSize(bytes) {
@@ -19,13 +10,9 @@ export function formatFileSize(bytes) {
   return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
 }
 
-/**
- * Verify binary data is a valid ZIP (DOCX) file
- */
 export function isValidZipFile(data) {
   const bytes = data instanceof Uint8Array ? data : new Uint8Array(data);
   if (bytes.length < 4) return false;
-  // ZIP files start with PK\x03\x04
   return bytes[0] === 80 && bytes[1] === 75 && bytes[2] === 3 && bytes[3] === 4;
 }
 

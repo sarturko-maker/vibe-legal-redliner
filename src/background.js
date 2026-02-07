@@ -1,23 +1,25 @@
-/**
- * Background Service Worker
- * Manages the offscreen document for Pyodide execution
- * Handles side panel and full screen modes
- */
-
 let pyodideReady = false;
 let creatingOffscreen = null;
 let pyodideReadyPromise = null;
 let pyodideReadyResolve = null;
 let pyodideReadyReject = null;
 
-// Enable side panel on all pages
 chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: false }).catch(() => {});
 
-/**
- * Returns a promise that resolves when Pyodide is ready.
- * Rejects if Pyodide fails to initialize.
- * Resolves immediately if already ready.
- */
+function resetReadyState() {
+  pyodideReadyPromise = null;
+  pyodideReadyResolve = null;
+  pyodideReadyReject = null;
+}
+
+function resolveReady() {
+  pyodideReady = true;
+  if (pyodideReadyResolve) {
+    pyodideReadyResolve();
+    resetReadyState();
+  }
+}
+
 function waitForPyodideReady() {
   if (pyodideReady) return Promise.resolve();
   if (!pyodideReadyPromise) {
@@ -29,55 +31,33 @@ function waitForPyodideReady() {
   return pyodideReadyPromise;
 }
 
-/**
- * Create the offscreen document if it doesn't exist.
- * Resets pyodideReady when a new document is created.
- */
 async function ensureOffscreenDocument() {
-  // Return existing promise if creation is in progress
-  if (creatingOffscreen) {
-    return creatingOffscreen;
-  }
+  if (creatingOffscreen) return creatingOffscreen;
 
   creatingOffscreen = (async () => {
-    // Check if offscreen document already exists
     try {
       const existingContexts = await chrome.runtime.getContexts({
         contextTypes: ['OFFSCREEN_DOCUMENT']
       });
 
       if (existingContexts.length > 0) {
-        // Offscreen doc exists — if service worker restarted, pyodideReady
-        // was reset to false. Ping the offscreen doc to recover state.
         if (!pyodideReady) {
           try {
             const pingResp = await chrome.runtime.sendMessage({ type: 'ping' });
-            if (pingResp && pingResp.ready) {
-              pyodideReady = true;
-              if (pyodideReadyResolve) {
-                pyodideReadyResolve();
-                pyodideReadyPromise = null;
-                pyodideReadyResolve = null;
-                pyodideReadyReject = null;
-              }
-            }
-          } catch (e) {
-            // Ping failed — offscreen doc may still be initializing
+            if (pingResp?.ready) resolveReady();
+          } catch {
+            // Offscreen doc may still be initializing
           }
         }
         return;
       }
-    } catch (e) {
+    } catch {
       // getContexts might fail, proceed to try creating
     }
 
-    // New offscreen doc needed — reset ready state so waitForPyodideReady() waits
     pyodideReady = false;
-    pyodideReadyPromise = null;
-    pyodideReadyResolve = null;
-    pyodideReadyReject = null;
+    resetReadyState();
 
-    // Create offscreen document
     try {
       await chrome.offscreen.createDocument({
         url: 'offscreen.html',
@@ -85,59 +65,49 @@ async function ensureOffscreenDocument() {
         justification: 'Run Pyodide for document processing'
       });
     } catch (e) {
-      // Ignore "already exists" error
-      if (!e.message.includes('single offscreen')) {
-        throw e;
-      }
+      if (!e.message.includes('single offscreen')) throw e;
     }
   })();
 
-  // Reset the promise after completion to allow retry on failure
-  creatingOffscreen.finally(() => {
-    creatingOffscreen = null;
-  });
-
+  creatingOffscreen.finally(() => { creatingOffscreen = null; });
   return creatingOffscreen;
 }
 
-/**
- * Handle messages from popup
- */
+async function forwardToOffscreen(offscreenType, message, sendResponse) {
+  try {
+    await ensureOffscreenDocument();
+    await waitForPyodideReady();
+    const response = await chrome.runtime.sendMessage({
+      type: offscreenType,
+      ...message
+    });
+    sendResponse(response);
+  } catch (error) {
+    sendResponse({ success: false, error: error.message });
+  }
+}
+
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-  // Handle pyodide ready notification from offscreen
   if (message.type === 'pyodide-ready') {
-    pyodideReady = true;
-    // Resolve any pending waitForPyodideReady() callers
-    if (pyodideReadyResolve) {
-      pyodideReadyResolve();
-      pyodideReadyPromise = null;
-      pyodideReadyResolve = null;
-      pyodideReadyReject = null;
-    }
-    // Broadcast to all extension pages
+    resolveReady();
     chrome.runtime.sendMessage({ type: 'engine-ready' }).catch(() => {});
     return;
   }
 
   if (message.type === 'pyodide-error') {
-    // Reject any pending waitForPyodideReady() callers
     if (pyodideReadyReject) {
       pyodideReadyReject(new Error('Engine failed to initialise: ' + (message.error || 'unknown error')));
-      pyodideReadyPromise = null;
-      pyodideReadyResolve = null;
-      pyodideReadyReject = null;
+      resetReadyState();
     }
     chrome.runtime.sendMessage({ type: 'engine-error', error: message.error }).catch(() => {});
     return;
   }
 
-  // Handle status check from popup — synchronous, no offscreen creation
   if (message.type === 'check-engine-status') {
     sendResponse({ ready: pyodideReady });
     return;
   }
 
-  // Handle ensure-engine request — creates offscreen doc and waits for Pyodide
   if (message.type === 'ensure-engine') {
     ensureOffscreenDocument()
       .then(() => waitForPyodideReady())
@@ -146,39 +116,19 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
 
-  // Handle text extraction request
   if (message.type === 'extract-text') {
-    ensureOffscreenDocument().then(async () => {
-      try {
-        await waitForPyodideReady();
-        const response = await chrome.runtime.sendMessage({
-          type: 'extract',
-          contractBytes: message.contractBytes,
-          cleanView: message.cleanView
-        });
-        sendResponse(response);
-      } catch (error) {
-        sendResponse({ success: false, error: error.message });
-      }
-    });
+    forwardToOffscreen('extract', {
+      contractBytes: message.contractBytes,
+      cleanView: message.cleanView
+    }, sendResponse);
     return true;
   }
 
-  // Handle apply-edits request
   if (message.type === 'apply-edits') {
-    ensureOffscreenDocument().then(async () => {
-      try {
-        await waitForPyodideReady();
-        const response = await chrome.runtime.sendMessage({
-          type: 'apply',
-          contractBytes: message.contractBytes,
-          edits: message.edits
-        });
-        sendResponse(response);
-      } catch (error) {
-        sendResponse({ success: false, error: error.message });
-      }
-    });
+    forwardToOffscreen('apply', {
+      contractBytes: message.contractBytes,
+      edits: message.edits
+    }, sendResponse);
     return true;
   }
 

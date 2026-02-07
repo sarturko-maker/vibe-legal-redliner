@@ -1,19 +1,8 @@
-/**
- * UI rendering
- */
-
 import { state } from './state.js';
 import { AI_PROVIDERS, JOB_STATUS } from './config.js';
 import { formatFileSize, MAX_BATCH_FILES } from './file-processing.js';
 import { safeSetHTML } from './trusted-html.js';
 
-// ============================================================================
-// HELPERS
-// ============================================================================
-
-/**
- * Escape HTML to prevent XSS
- */
 export function escapeHtml(str) {
   if (!str) return '';
   const div = document.createElement('div');
@@ -22,22 +11,33 @@ export function escapeHtml(str) {
 }
 
 export function closeModal() {
-  const modal = document.getElementById('modal');
-  if (modal) {
-    modal.remove();
-  }
+  document.getElementById('modal')?.remove();
 }
 
-// ============================================================================
-// RENDER
-// ============================================================================
+function playbookSelect({ disabled = false } = {}) {
+  const playbook = state.playbooks.find(p => p.id === state.selectedPlaybookId);
+  return `
+    <div class="card">
+      <div class="card-header">
+        <h3>Playbook</h3>
+      </div>
+      <select class="form-select" name="playbook-select" ${disabled ? 'disabled' : ''}>
+        ${state.playbooks.map(p => `
+          <option value="${escapeHtml(p.id)}" ${p.id === state.selectedPlaybookId ? 'selected' : ''}>
+            ${escapeHtml(p.name)}
+          </option>
+        `).join('')}
+      </select>
+      ${playbook ? `<p class="form-hint">${escapeHtml(playbook.description)}</p>` : ''}
+    </div>
+  `;
+}
 
 export function render() {
   const app = document.getElementById('app');
 
   safeSetHTML(app, `
     <div class="app-container">
-      <!-- Sidebar -->
       <nav class="sidebar">
         <div class="sidebar-header">
           <div class="logo">VL</div>
@@ -47,18 +47,11 @@ export function render() {
           </div>
         </div>
         <ul class="nav-list">
-          <li class="nav-item ${state.currentPage === 'review' ? 'active' : ''}" data-action="nav" data-page="review">
-            Review
-          </li>
-          <li class="nav-item ${state.currentPage === 'batch' ? 'active' : ''}" data-action="nav" data-page="batch">
-            Batch
-          </li>
-          <li class="nav-item ${state.currentPage === 'playbooks' ? 'active' : ''}" data-action="nav" data-page="playbooks">
-            Playbooks
-          </li>
-          <li class="nav-item ${state.currentPage === 'settings' ? 'active' : ''}" data-action="nav" data-page="settings">
-            Settings
-          </li>
+          ${['review', 'batch', 'playbooks', 'settings'].map(page =>
+            `<li class="nav-item ${state.currentPage === page ? 'active' : ''}" data-action="nav" data-page="${page}">
+              ${page.charAt(0).toUpperCase() + page.slice(1)}
+            </li>`
+          ).join('')}
         </ul>
         <div class="sidebar-footer">
           ${state.pyodideReady ? `
@@ -70,7 +63,6 @@ export function render() {
         </div>
       </nav>
 
-      <!-- Main Content -->
       <main class="main-content">
         ${!state.disclaimerAcknowledged ? renderDisclaimerBanner() : ''}
         ${renderPage()}
@@ -96,17 +88,16 @@ function renderDisclaimerBanner() {
 
 function renderPage() {
   switch (state.currentPage) {
-    case 'review': return renderReviewPage();
-    case 'batch': return renderBatchPage();
+    case 'batch':     return renderBatchPage();
     case 'playbooks': return renderPlaybooksPage();
-    case 'settings': return renderSettingsPage();
-    default: return renderReviewPage();
+    case 'settings':  return renderSettingsPage();
+    default:          return renderReviewPage();
   }
 }
 
 function renderReviewPage() {
   const { file, job, result } = state.review;
-  const playbook = state.playbooks.find(p => p.id === state.selectedPlaybookId);
+  const processing = job?.status === JOB_STATUS.PROCESSING;
 
   return `
     <div class="page">
@@ -115,7 +106,6 @@ function renderReviewPage() {
         <p>Upload a contract to analyze against your playbook</p>
       </div>
 
-      <!-- File Upload -->
       <div class="card">
         <div class="card-header">
           <h3>Contract</h3>
@@ -137,31 +127,13 @@ function renderReviewPage() {
         </div>
       </div>
 
-      <!-- Playbook Selection -->
-      <div class="card">
-        <div class="card-header">
-          <h3>Playbook</h3>
-        </div>
-        <select class="form-select" name="playbook-select">
-          ${state.playbooks.map(p => `
-            <option value="${escapeHtml(p.id)}" ${p.id === state.selectedPlaybookId ? 'selected' : ''}>
-              ${escapeHtml(p.name)}
-            </option>
-          `).join('')}
-        </select>
-        ${playbook ? `<p class="form-hint">${escapeHtml(playbook.description)}</p>` : ''}
-      </div>
+      ${playbookSelect()}
+      ${job ? renderJobStatus(job) : ''}
 
-      <!-- Progress / Result -->
-      ${job ? renderJobStatus(job, result) : ''}
-
-      <!-- Action Button -->
       ${!result ? `
         <button class="btn btn-primary btn-full" data-action="process"
-          ${!file || job?.status === JOB_STATUS.PROCESSING ? 'disabled' : ''}>
-          ${job?.status === JOB_STATUS.PROCESSING ? `
-            <span class="spinner"></span> Processing...
-          ` : 'Analyze & Redline'}
+          ${!file || processing ? 'disabled' : ''}>
+          ${processing ? '<span class="spinner"></span> Processing...' : 'Analyze & Redline'}
         </button>
       ` : `
         <button class="btn btn-success btn-full" data-action="download">
@@ -172,7 +144,7 @@ function renderReviewPage() {
   `;
 }
 
-function renderJobStatus(job, result) {
+function renderJobStatus(job) {
   if (job.status === JOB_STATUS.ERROR) {
     return `
       <div class="status-card error">
@@ -255,7 +227,6 @@ function renderEditsPanel() {
 
 function renderBatchPage() {
   const { files, jobs, isProcessing } = state.batch;
-  const playbook = state.playbooks.find(p => p.id === state.selectedPlaybookId);
   const hasJobs = jobs.length > 0;
   const completedCount = jobs.filter(j => j.status === JOB_STATUS.COMPLETE && j.result).length;
   const allDone = hasJobs && !isProcessing;
@@ -267,7 +238,6 @@ function renderBatchPage() {
         <p>Process up to ${MAX_BATCH_FILES} contracts at once</p>
       </div>
 
-      <!-- File Upload -->
       <div class="card">
         <div class="card-header">
           <h3>Contracts</h3>
@@ -297,22 +267,8 @@ function renderBatchPage() {
         ` : ''}
       </div>
 
-      <!-- Playbook Selection -->
-      <div class="card">
-        <div class="card-header">
-          <h3>Playbook</h3>
-        </div>
-        <select class="form-select" name="playbook-select" ${isProcessing ? 'disabled' : ''}>
-          ${state.playbooks.map(p => `
-            <option value="${escapeHtml(p.id)}" ${p.id === state.selectedPlaybookId ? 'selected' : ''}>
-              ${escapeHtml(p.name)}
-            </option>
-          `).join('')}
-        </select>
-        ${playbook ? `<p class="form-hint">${escapeHtml(playbook.description)}</p>` : ''}
-      </div>
+      ${playbookSelect({ disabled: isProcessing })}
 
-      <!-- Job Queue -->
       ${hasJobs ? `
         <div class="card">
           <div class="card-header">
@@ -324,7 +280,6 @@ function renderBatchPage() {
         </div>
       ` : ''}
 
-      <!-- Action Buttons -->
       <div class="batch-actions">
         ${!allDone || completedCount === 0 ? `
           <button class="btn btn-primary btn-full" data-action="batch-process"
@@ -344,31 +299,28 @@ function renderBatchPage() {
   `;
 }
 
-function renderBatchJob(job, index) {
-  const isProcessing = job.status === JOB_STATUS.PROCESSING;
-  const isComplete = job.status === JOB_STATUS.COMPLETE;
-  const isError = job.status === JOB_STATUS.ERROR;
-  const isQueued = job.status === JOB_STATUS.QUEUED;
+const BATCH_STATUS_MAP = {
+  [JOB_STATUS.PROCESSING]: { icon: '<span class="spinner spinner-dark"></span>', css: 'processing' },
+  [JOB_STATUS.COMPLETE]:   { icon: '&#10004;', css: 'complete' },
+  [JOB_STATUS.ERROR]:      { icon: '&#10060;', css: 'error' },
+  [JOB_STATUS.QUEUED]:     { icon: '&#9679;',  css: 'queued' },
+};
 
-  let statusIcon = '';
-  let statusClass = '';
-  if (isProcessing) { statusIcon = '<span class="spinner spinner-dark"></span>'; statusClass = 'processing'; }
-  else if (isComplete) { statusIcon = '&#10004;'; statusClass = 'complete'; }
-  else if (isError) { statusIcon = '&#10060;'; statusClass = 'error'; }
-  else if (isQueued) { statusIcon = '&#9679;'; statusClass = 'queued'; }
+function renderBatchJob(job, index) {
+  const { icon, css } = BATCH_STATUS_MAP[job.status] || { icon: '', css: '' };
 
   return `
-    <div class="batch-job batch-job--${statusClass}">
+    <div class="batch-job batch-job--${css}">
       <div class="batch-job-header">
         <div class="batch-job-info">
-          <span class="batch-job-status">${statusIcon}</span>
+          <span class="batch-job-status">${icon}</span>
           <span class="batch-job-name">${escapeHtml(job.fileName)}</span>
         </div>
-        ${isComplete && job.result ? `
+        ${job.status === JOB_STATUS.COMPLETE && job.result ? `
           <button class="btn-text" data-action="batch-download" data-index="${index}">Download</button>
         ` : ''}
       </div>
-      ${isProcessing ? `
+      ${job.status === JOB_STATUS.PROCESSING ? `
         <div class="batch-job-progress">
           <div class="progress-bar">
             <div class="progress-fill" style="width: ${job.progress}%"></div>
@@ -376,10 +328,10 @@ function renderBatchJob(job, index) {
           <span class="batch-job-phase">${escapeHtml(job.phase)}</span>
         </div>
       ` : ''}
-      ${isComplete ? `
+      ${job.status === JOB_STATUS.COMPLETE ? `
         <span class="batch-job-detail">${job.editCount} change${job.editCount !== 1 ? 's' : ''} applied</span>
       ` : ''}
-      ${isError ? `
+      ${job.status === JOB_STATUS.ERROR ? `
         <span class="batch-job-error">${escapeHtml(job.error)}</span>
       ` : ''}
     </div>
@@ -387,48 +339,38 @@ function renderBatchJob(job, index) {
 }
 
 function renderPlaybooksPage() {
-  if (state.editingPlaybookId) {
-    return renderPlaybookEditPage();
-  }
-
-  if (state.playbooks.length === 0) {
-    return `
-      <div class="page">
-        <div class="page-header">
-          <h1>Playbooks</h1>
-          <p>No playbooks yet. Create one to get started.</p>
-          <button class="btn btn-primary" data-action="new-playbook">+ New Playbook</button>
-        </div>
-      </div>
-    `;
-  }
+  if (state.editingPlaybookId) return renderPlaybookEditPage();
 
   return `
     <div class="page">
       <div class="page-header">
         <h1>Playbooks</h1>
-        <p>Manage your contract review playbooks</p>
+        <p>${state.playbooks.length === 0
+          ? 'No playbooks yet. Create one to get started.'
+          : 'Manage your contract review playbooks'}</p>
         <button class="btn btn-primary" data-action="new-playbook">+ New Playbook</button>
       </div>
 
-      <div class="playbook-grid">
-        ${state.playbooks.map(p => `
-          <div class="playbook-card ${p.id === state.selectedPlaybookId ? 'selected' : ''}"
-               data-action="edit-playbook" data-id="${escapeHtml(p.id)}">
-            <div class="playbook-header">
-              <h3>${escapeHtml(p.name)}</h3>
-              <div style="display:flex;align-items:center;gap:8px">
-                ${p.isExample ? `<span class="badge">EXAMPLE</span>` : ''}
-                <button class="btn-icon" data-action="delete-playbook" data-id="${escapeHtml(p.id)}" title="Delete">
-                  &#128465;
-                </button>
+      ${state.playbooks.length > 0 ? `
+        <div class="playbook-grid">
+          ${state.playbooks.map(p => `
+            <div class="playbook-card ${p.id === state.selectedPlaybookId ? 'selected' : ''}"
+                 data-action="edit-playbook" data-id="${escapeHtml(p.id)}">
+              <div class="playbook-header">
+                <h3>${escapeHtml(p.name)}</h3>
+                <div style="display:flex;align-items:center;gap:8px">
+                  ${p.isExample ? `<span class="badge">EXAMPLE</span>` : ''}
+                  <button class="btn-icon" data-action="delete-playbook" data-id="${escapeHtml(p.id)}" title="Delete">
+                    &#128465;
+                  </button>
+                </div>
               </div>
+              <p class="playbook-desc">${escapeHtml(p.description || 'No description')}</p>
+              ${p.id === state.selectedPlaybookId ? `<div class="playbook-selected">Selected</div>` : ''}
             </div>
-            <p class="playbook-desc">${escapeHtml(p.description || 'No description')}</p>
-            ${p.id === state.selectedPlaybookId ? `<div class="playbook-selected">Selected</div>` : ''}
-          </div>
-        `).join('')}
-      </div>
+          `).join('')}
+        </div>
+      ` : ''}
     </div>
   `;
 }
@@ -487,6 +429,8 @@ function renderSettingsPage() {
   const models = state.connectionTested && state.availableModels.length > 0
     ? state.availableModels
     : provider?.models || [];
+  const isGemini = state.settings.provider === 'gemini';
+  const hasAuditEntries = state.auditLog.length > 0;
 
   return `
     <div class="page">
@@ -515,9 +459,9 @@ function renderSettingsPage() {
           <label class="form-label">API Key</label>
           <input type="password" class="form-input" name="apiKey"
             value="${escapeHtml(state.settings.apiKey)}"
-            placeholder="${state.settings.provider === 'gemini' ? 'AIza...' : 'sk-or-...'}">
+            placeholder="${isGemini ? 'AIza...' : 'sk-or-...'}">
           <p class="form-hint">
-            ${state.settings.provider === 'gemini'
+            ${isGemini
               ? 'Get your API key from <a href="https://aistudio.google.com/apikey" target="_blank">Google AI Studio</a>'
               : 'Get your API key from <a href="https://openrouter.ai/keys" target="_blank">OpenRouter</a>'}
           </p>
@@ -569,7 +513,7 @@ function renderSettingsPage() {
           </select>
         </div>
 
-        ${state.auditLog.length > 0 ? `
+        ${hasAuditEntries ? `
           <div class="audit-log-table-wrap">
             <table class="audit-log-table">
               <thead>
@@ -599,8 +543,8 @@ function renderSettingsPage() {
         `}
 
         <div class="audit-log-actions">
-          <button class="btn btn-secondary" data-action="export-audit-log" ${state.auditLog.length === 0 ? 'disabled' : ''}>Export Log</button>
-          <button class="btn btn-secondary" data-action="clear-audit-log" ${state.auditLog.length === 0 ? 'disabled' : ''}>Clear Log</button>
+          <button class="btn btn-secondary" data-action="export-audit-log" ${!hasAuditEntries ? 'disabled' : ''}>Export Log</button>
+          <button class="btn btn-secondary" data-action="clear-audit-log" ${!hasAuditEntries ? 'disabled' : ''}>Clear Log</button>
         </div>
       </div>
 

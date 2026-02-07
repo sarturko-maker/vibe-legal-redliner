@@ -1,15 +1,7 @@
-/**
- * Offscreen Document for Pyodide execution
- * This runs in a separate context with fewer CSP restrictions
- */
-
 let pyodide = null;
 let ready = false;
 let storedDocxBytes = null;
 
-/**
- * Load Adeu Python source files into Pyodide's virtual filesystem
- */
 async function loadAdeuSource() {
   const files = [
     { path: 'python/adeu/__init__.py', dest: '/adeu/__init__.py' },
@@ -26,7 +18,6 @@ async function loadAdeuSource() {
     { path: 'python/adeu/VERSION', dest: '/adeu/VERSION' }
   ];
 
-  // Create directory structure
   pyodide.FS.mkdir('/adeu');
   pyodide.FS.mkdir('/adeu/redline');
   pyodide.FS.mkdir('/adeu/utils');
@@ -36,33 +27,31 @@ async function loadAdeuSource() {
       const url = chrome.runtime.getURL(file.path);
       const response = await fetch(url);
       if (response.ok) {
-        const content = await response.text();
-        pyodide.FS.writeFile(file.dest, content);
+        pyodide.FS.writeFile(file.dest, await response.text());
       } else if (file.dest.endsWith('__init__.py')) {
         pyodide.FS.writeFile(file.dest, '');
       }
-    } catch (e) {
+    } catch {
       if (file.dest.endsWith('__init__.py')) {
         pyodide.FS.writeFile(file.dest, '');
       }
-      // Non-init files failing to load will cause import errors later
     }
   }
 }
 
-/**
- * Initialize Pyodide
- */
+function cleanupPythonVars(...names) {
+  const stmts = names.map(n => `try:\n    del ${n}\nexcept NameError:\n    pass`);
+  return pyodide.runPythonAsync(stmts.join('\n'));
+}
+
 async function initPyodide() {
   try {
-    // Load Pyodide with local index URL
     pyodide = await loadPyodide({
       indexURL: chrome.runtime.getURL('pyodide/')
     });
 
-    // Load micropip
     await pyodide.loadPackage('micropip');
-    
+
     const packages = [
       'pyodide/typing_extensions-4.11.0-py3-none-any.whl',
       'pyodide/annotated_types-0.6.0-py3-none-any.whl',
@@ -74,7 +63,6 @@ async function initPyodide() {
       'pyodide/structlog-25.5.0-py3-none-any.whl'
     ];
 
-    // Build full URLs in JavaScript and pass to Python
     const packageUrls = packages.map(p => chrome.runtime.getURL(p));
     pyodide.globals.set('package_urls', packageUrls);
 
@@ -84,16 +72,13 @@ urls = package_urls.to_py()
 await micropip.install(urls)
 `);
 
-    // Load Adeu source files
     await loadAdeuSource();
 
-    // Set up Python path
     await pyodide.runPythonAsync(`
 import sys
 sys.path.insert(0, '/')
 `);
 
-    // Test import and log version
     const adeuVersion = await pyodide.runPythonAsync(`
 from adeu.models import DocumentEdit
 from adeu.redline.engine import RedlineEngine
@@ -102,7 +87,6 @@ adeu.__version__
 `);
     console.log(`Adeu engine v${adeuVersion}`);
 
-    // Load wrapper code
     await pyodide.runPythonAsync(`
 import json
 from io import BytesIO
@@ -120,60 +104,31 @@ def extract_text(docx_bytes: bytes, clean_view: bool = False) -> str:
         stream.close()
 
 def enable_track_changes(doc):
-    """
-    Enable track changes visibility in the document settings.
-    Removes ALL protection mechanisms that could cause read-only mode.
-    """
     settings = doc.settings.element
 
-    # Add w:trackRevisions if not present (tells Word track changes exist)
     if settings.find(qn('w:trackRevisions')) is None:
-        track_revisions = OxmlElement('w:trackRevisions')
-        settings.append(track_revisions)
+        settings.append(OxmlElement('w:trackRevisions'))
 
-    # Remove any w:revisionView that might hide markup
-    for rv in settings.findall(qn('w:revisionView')):
-        settings.remove(rv)
+    for tag in ['w:revisionView', 'w:documentProtection', 'w:writeProtection', 'w:docFinal']:
+        for el in settings.findall(qn(tag)):
+            settings.remove(el)
 
-    # Remove document protection (causes read-only)
-    for dp in settings.findall(qn('w:documentProtection')):
-        settings.remove(dp)
-
-    # Remove write protection
-    for wp in settings.findall(qn('w:writeProtection')):
-        settings.remove(wp)
-
-    # Remove document being marked as "final" (read-only recommendation)
-    for df in settings.findall(qn('w:docFinal')):
-        settings.remove(df)
-
-    # Also check the document body for content locks
     body = doc.element.body
     if body is not None:
-        # Remove permission ranges that might restrict editing
         for perm in body.xpath('//w:permStart | //w:permEnd'):
             perm.getparent().remove(perm)
-
-        # Remove content locks
         for lock in body.xpath('//w:lock'):
             lock.getparent().remove(lock)
 
 def strip_comments(doc):
-    """
-    Remove all comment-related parts and XML elements from the document.
-    CommentsManager creates these parts on init even when no comments are added,
-    which can cause Word to show an empty comments panel.
-    """
     from docx.opc.constants import CONTENT_TYPE as CT_CONST
     from docx.opc.constants import RELATIONSHIP_TYPE as RT_CONST
 
-    # 1. Remove comment range markers and references from document body
     body = doc.element.body
     if body is not None:
         for tag in ['w:commentRangeStart', 'w:commentRangeEnd']:
             for el in body.xpath(f'//{tag}'):
                 el.getparent().remove(el)
-        # Remove comment reference runs
         for ref in body.xpath('//w:commentReference'):
             run = ref.getparent()
             if run is not None and run.tag.endswith('}r'):
@@ -181,29 +136,14 @@ def strip_comments(doc):
             else:
                 ref.getparent().remove(ref)
 
-    # 2. Remove comment-related relationships and parts
-    comment_rel_types = [
-        RT_CONST.COMMENTS,
-    ]
-    # Also match extended comment relationship types by URI pattern
-    comment_uri_patterns = [
-        'comments',
-        'commentsExtended',
-        'commentsIds',
-        'commentsExtensible',
-    ]
+    comment_uri_patterns = ['comments', 'commentsExtended', 'commentsIds', 'commentsExtensible']
     rels_to_remove = []
     for rel_key, rel in doc.part.rels.items():
         rel_type = rel.reltype or ''
         partname = str(getattr(rel, '_target', None))
-        # Match by relationship type
-        if rel_type in comment_rel_types:
-            rels_to_remove.append(rel_key)
-        # Match by partname pattern
-        elif any(pat in partname.lower() for pat in comment_uri_patterns):
-            rels_to_remove.append(rel_key)
-        # Match by relationship type URI containing 'comment'
-        elif 'comment' in rel_type.lower():
+        if (rel_type == RT_CONST.COMMENTS
+            or any(pat in partname.lower() for pat in comment_uri_patterns)
+            or 'comment' in rel_type.lower()):
             rels_to_remove.append(rel_key)
 
     for rel_key in rels_to_remove:
@@ -217,21 +157,13 @@ def strip_comments(doc):
 
 def process_document(docx_bytes: bytes, edits_json: str, author: str = 'Vibe Legal') -> dict:
     edits_data = json.loads(edits_json)
-    edits = []
-    for edit in edits_data:
-        edits.append(DocumentEdit(
-            target_text=edit.get('target_text', ''),
-            new_text=edit.get('new_text', '')
-        ))
+    edits = [DocumentEdit(target_text=e.get('target_text', ''), new_text=e.get('new_text', '')) for e in edits_data]
+
     input_stream = BytesIO(docx_bytes)
     try:
         engine = RedlineEngine(input_stream, author=author)
 
-        # Apply edits one at a time to track per-edit status.
-        # Sort longest target_text first (matches Adeu's internal strategy)
-        # but preserve original indices for status reporting.
-        indexed = list(enumerate(edits))
-        indexed.sort(key=lambda x: len(x[1].target_text), reverse=True)
+        indexed = sorted(enumerate(edits), key=lambda x: len(x[1].target_text), reverse=True)
 
         statuses = [False] * len(edits)
         applied = 0
@@ -258,8 +190,6 @@ def process_document(docx_bytes: bytes, edits_json: str, author: str = 'Vibe Leg
 `);
 
     ready = true;
-
-    // Notify that we're ready
     chrome.runtime.sendMessage({ type: 'pyodide-ready' });
 
   } catch (error) {
@@ -267,13 +197,8 @@ def process_document(docx_bytes: bytes, edits_json: str, author: str = 'Vibe Leg
   }
 }
 
-/**
- * Process a document with redlines
- */
 async function processDocument(contractBytes, editsJson) {
-  if (!ready) {
-    throw new Error('Pyodide not ready');
-  }
+  if (!ready) throw new Error('Pyodide not ready');
 
   pyodide.globals.set('js_contract_bytes', contractBytes);
   pyodide.globals.set('js_edits_json', editsJson);
@@ -290,79 +215,32 @@ result
   const skipped = resultMap.get('skipped');
   const statuses = JSON.parse(resultMap.get('statuses'));
 
-  // -----------------------------------------------------------------------
-  // Data lifecycle cleanup
-  //
-  // Document bytes exist ONLY in RAM and are NEVER written to disk.
-  // The lifecycle is:
-  //   1. The UI sends contract bytes via chrome.runtime.sendMessage
-  //   2. This function passes them into Pyodide for processing
-  //   3. Pyodide returns redlined bytes, copied into a JS Uint8Array above
-  //   4. The message handler sends the Uint8Array back to the UI, then
-  //      the reference is nulled out
-  //
-  // All memory is also released automatically if the offscreen document
-  // is destroyed (happens when the popup/tab closes or the extension
-  // is unloaded). The explicit cleanup below ensures that between
-  // sequential calls (e.g. batch processing), the previous document's
-  // data does not linger in either the JS heap or Pyodide's Python heap.
-  // -----------------------------------------------------------------------
-
-  // 1. Destroy the Pyodide proxy that bridges Python bytes → JS
   if (result.destroy) result.destroy();
-
-  // 2. Remove the JS→Python bridge globals (input bytes and edits JSON)
   pyodide.globals.delete('js_contract_bytes');
   pyodide.globals.delete('js_edits_json');
-
-  // 3. Delete Python-side intermediate variables that persist in module scope
-  //    (contract_bytes and result survive between calls if not explicitly deleted)
-  await pyodide.runPythonAsync(`
-try:
-    del contract_bytes
-except NameError:
-    pass
-try:
-    del result
-except NameError:
-    pass
-  `);
+  await cleanupPythonVars('contract_bytes', 'result');
 
   return { outputBytes, applied, skipped, statuses };
 }
 
-/**
- * Extract text from a DOCX using Adeu's Python pipeline
- */
 async function extractText(contractBytes, cleanView) {
-  if (!ready) {
-    throw new Error('Pyodide not ready');
-  }
+  if (!ready) throw new Error('Pyodide not ready');
 
   pyodide.globals.set('js_extract_bytes', contractBytes);
   pyodide.globals.set('js_clean_view', cleanView);
 
-  const result = await pyodide.runPythonAsync(`
+  const text = await pyodide.runPythonAsync(`
 doc_bytes = bytes(js_extract_bytes.to_py())
 extract_text(doc_bytes, clean_view=js_clean_view)
   `);
 
-  const text = result;
-
-  // Cleanup
   pyodide.globals.delete('js_extract_bytes');
   pyodide.globals.delete('js_clean_view');
-  await pyodide.runPythonAsync(`
-try:
-    del doc_bytes
-except NameError:
-    pass
-  `);
+  await cleanupPythonVars('doc_bytes');
 
   return text;
 }
 
-// Listen for messages from the service worker or popup
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.type === 'ping') {
     sendResponse({ ready });
@@ -372,23 +250,15 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.type === 'extract') {
     const bytes = new Uint8Array(message.contractBytes);
     const cleanView = message.cleanView ?? false;
-
-    // Store bytes for subsequent apply call
     storedDocxBytes = bytes;
 
     extractText(bytes, cleanView)
-      .then(text => {
-        sendResponse({ success: true, text });
-      })
-      .catch(error => {
-        sendResponse({ success: false, error: error.message || 'Text extraction failed' });
-      });
-
+      .then(text => sendResponse({ success: true, text }))
+      .catch(error => sendResponse({ success: false, error: error.message || 'Text extraction failed' }));
     return true;
   }
 
   if (message.type === 'apply') {
-    // Prefer stored bytes; fall back to bytes sent in the message
     const bytes = storedDocxBytes || (message.contractBytes ? new Uint8Array(message.contractBytes) : null);
 
     if (!bytes) {
@@ -398,21 +268,14 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
     processDocument(bytes, JSON.stringify(message.edits))
       .then(({ outputBytes, applied, skipped, statuses }) => {
-        const response = Array.from(outputBytes);
-        outputBytes = null;
-        // Null stored bytes after successful apply
         storedDocxBytes = null;
-        sendResponse({ success: true, result: response, applied, skipped, statuses });
+        sendResponse({ success: true, result: Array.from(outputBytes), applied, skipped, statuses });
       })
-      .catch(error => {
-        sendResponse({ success: false, error: error.message || 'Document processing failed' });
-      });
-
+      .catch(error => sendResponse({ success: false, error: error.message || 'Document processing failed' }));
     return true;
   }
 
   return false;
 });
 
-// Start initialization
 initPyodide();

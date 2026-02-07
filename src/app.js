@@ -1,8 +1,3 @@
-/**
- * Vibe Legal Redliner - Main Application Entry Point
- * Chrome Extension with full server functionality
- */
-
 import { state, loadSettings, saveSettings, purgeOldAuditEntries, writeAuditLogEntry, clearAuditLog, exportAuditLog } from './state.js';
 import { AI_PROVIDERS, JOB_STATUS } from './config.js';
 import { render, closeModal } from './ui.js';
@@ -11,19 +6,9 @@ import { handleTestConnection } from './api-handler.js';
 import { isValidZipFile, MAX_FILE_SIZE, MAX_TEXT_LENGTH, MAX_BATCH_FILES, downloadFile } from './file-processing.js';
 import { analyzeContract } from './utils/ai-bundle.js';
 
-// ============================================================================
-// ENGINE COMMUNICATION (via Background Service Worker)
-// ============================================================================
-
 const ENGINE_INIT_TIMEOUT_MS = 60000;
 let engineInitPromise = null;
 
-/**
- * Ensures the Pyodide engine is ready. Creates the offscreen document and
- * waits for Pyodide to initialize if needed. Returns immediately when already
- * ready. Uses a singleton promise so concurrent callers share one attempt.
- * On failure, clears the cached promise so the next call retries fresh.
- */
 function ensureEngineReady() {
   if (state.pyodideReady) return Promise.resolve();
   if (engineInitPromise) return engineInitPromise;
@@ -35,7 +20,7 @@ function ensureEngineReady() {
           reject(new Error('Engine failed to initialise. Please reload the extension.'));
           return;
         }
-        if (response && response.ready) {
+        if (response?.ready) {
           state.pyodideReady = true;
           render();
           resolve();
@@ -48,7 +33,6 @@ function ensureEngineReady() {
       setTimeout(() => reject(new Error('Engine failed to initialise within 60 seconds. Please reload the extension.')), ENGINE_INIT_TIMEOUT_MS)
     )
   ]).catch((err) => {
-    // Clear cached promise so next call retries fresh
     engineInitPromise = null;
     throw err;
   });
@@ -56,9 +40,6 @@ function ensureEngineReady() {
   return engineInitPromise;
 }
 
-/**
- * Send a message to the background service worker and return a promise.
- */
 function sendMsg(msg) {
   return new Promise((resolve, reject) => {
     chrome.runtime.sendMessage(msg, (response) => {
@@ -71,37 +52,34 @@ function sendMsg(msg) {
   });
 }
 
-// ============================================================================
-// DOCUMENT PROCESSING
-// ============================================================================
+function auditBase(file) {
+  return {
+    filename: file.name,
+    fileSizeBytes: file.size,
+    provider: state.settings.provider,
+    model: state.settings.model
+  };
+}
+
+function updateJob(job, fields) {
+  Object.assign(job, fields);
+  render();
+}
 
 async function processDocument() {
   const { file } = state.review;
   const playbook = state.playbooks.find(p => p.id === state.selectedPlaybookId);
 
-  if (!file) {
-    alert('Please upload a contract file');
-    return;
-  }
-
-  if (file.size > MAX_FILE_SIZE) {
-    alert('File is too large. Maximum size is 50MB.');
-    return;
-  }
-
+  if (!file) { alert('Please upload a contract file'); return; }
+  if (file.size > MAX_FILE_SIZE) { alert('File is too large. Maximum size is 50MB.'); return; }
   if (!state.settings.apiKey) {
     alert('Please configure your API key in Settings');
     state.currentPage = 'settings';
     render();
     return;
   }
+  if (!playbook) { alert('Please select a playbook'); return; }
 
-  if (!playbook) {
-    alert('Please select a playbook');
-    return;
-  }
-
-  // Initialize job
   state.review.job = {
     id: Date.now().toString(),
     status: JOB_STATUS.PROCESSING,
@@ -115,7 +93,6 @@ async function processDocument() {
   render();
 
   try {
-    // Read file bytes
     const arrayBuffer = await file.arrayBuffer();
     const contractBytes = new Uint8Array(arrayBuffer);
 
@@ -123,38 +100,28 @@ async function processDocument() {
       throw new Error('Invalid file format. Please upload a valid .docx file.');
     }
 
-    // Ensure engine is ready before extracting text
     await ensureEngineReady();
+    updateJob(state.review.job, { progress: 10, current_phase: 'Reading document...' });
 
-    state.review.job.progress = 10;
-    state.review.job.current_phase = 'Reading document...';
-    render();
-
-    // Extract text via Adeu (clean_view=false → includes CriticMarkup)
     const extractResp = await sendMsg({
       type: 'extract-text',
       contractBytes: Array.from(contractBytes)
     });
 
-    if (!extractResp || !extractResp.success) {
+    if (!extractResp?.success) {
       throw new Error(extractResp?.error || 'Failed to extract text from document.');
     }
 
     const contractText = extractResp.text;
-
-    if (!contractText || contractText.trim().length === 0) {
+    if (!contractText?.trim()) {
       throw new Error('Document appears to be empty. Please upload a document with text content.');
     }
-
     if (contractText.length > MAX_TEXT_LENGTH) {
       throw new Error('Document text is too large for AI analysis. Please use a smaller document.');
     }
 
-    state.review.job.progress = 20;
-    state.review.job.current_phase = 'Analyzing with AI...';
-    render();
+    updateJob(state.review.job, { progress: 20, current_phase: 'Analyzing with AI...' });
 
-    // Call AI
     const aiResponse = await analyzeContract({
       provider: state.settings.provider,
       apiKey: state.settings.apiKey,
@@ -163,50 +130,41 @@ async function processDocument() {
       playbookText: playbook.playbookText
     });
 
-    // Store edits for UI display
     console.log('[VibeLegal] Raw AI response:', aiResponse.rawContent);
     console.log('[VibeLegal] Parsed edits:', aiResponse.edits);
     state.review.edits = aiResponse.edits;
 
-    state.review.job.progress = 60;
-    state.review.job.operations_total = aiResponse.edits.length;
-    state.review.job.current_phase = `Found ${aiResponse.edits.length} changes. Applying redlines...`;
-    render();
+    updateJob(state.review.job, {
+      progress: 60,
+      operations_total: aiResponse.edits.length,
+      current_phase: `Found ${aiResponse.edits.length} changes. Applying redlines...`
+    });
 
     if (aiResponse.edits.length === 0) {
-      state.review.job.status = JOB_STATUS.COMPLETE;
-      state.review.job.progress = 100;
-      state.review.job.current_phase = 'No changes needed';
-      writeAuditLogEntry({ filename: file.name, fileSizeBytes: file.size, provider: state.settings.provider, model: state.settings.model, editsReturned: 0, status: 'success' });
-      render();
+      updateJob(state.review.job, { status: JOB_STATUS.COMPLETE, progress: 100, current_phase: 'No changes needed' });
+      writeAuditLogEntry({ ...auditBase(file), editsReturned: 0, status: 'success' });
       return;
     }
 
-    state.review.job.progress = 80;
-    state.review.job.current_phase = 'Applying track changes...';
-    render();
+    updateJob(state.review.job, { progress: 80, current_phase: 'Applying track changes...' });
 
-    // Apply edits via Adeu (bytes already stored in offscreen from extract)
     const applyResp = await sendMsg({
       type: 'apply-edits',
       contractBytes: Array.from(contractBytes),
       edits: aiResponse.edits
     });
 
-    if (!applyResp || !applyResp.success) {
+    if (!applyResp?.success) {
       state.review.job.status = JOB_STATUS.ERROR;
       state.review.job.errors = ['Document processing failed. Please try again.'];
-      writeAuditLogEntry({ filename: file.name, fileSizeBytes: file.size, provider: state.settings.provider, model: state.settings.model, editsReturned: aiResponse.edits.length, status: 'error' });
+      writeAuditLogEntry({ ...auditBase(file), editsReturned: aiResponse.edits.length, status: 'error' });
       render();
       return;
     }
 
-    state.review.result = new Uint8Array(applyResp.result);
-    state.review.job.status = JOB_STATUS.COMPLETE;
-    state.review.job.progress = 100;
     const applied = applyResp.applied ?? aiResponse.edits.length;
     const skipped = applyResp.skipped ?? 0;
-    state.review.job.operations_complete = applied;
+    state.review.result = new Uint8Array(applyResp.result);
 
     if (applyResp.statuses && state.review.edits) {
       state.review.edits = state.review.edits.map((edit, i) => ({
@@ -215,57 +173,42 @@ async function processDocument() {
       }));
     }
 
-    if (skipped > 0) {
-      state.review.job.current_phase = `Complete — ${applied} of ${applied + skipped} edits applied (${skipped} could not be matched in the document)`;
-    } else {
-      state.review.job.current_phase = `Complete — ${applied} edits applied`;
-    }
-    writeAuditLogEntry({ filename: file.name, fileSizeBytes: file.size, provider: state.settings.provider, model: state.settings.model, editsReturned: aiResponse.edits.length, editsApplied: applied, editsSkipped: skipped, status: 'success' });
-    render();
+    const phaseText = skipped > 0
+      ? `Complete — ${applied} of ${applied + skipped} edits applied (${skipped} could not be matched in the document)`
+      : `Complete — ${applied} edits applied`;
+
+    updateJob(state.review.job, {
+      status: JOB_STATUS.COMPLETE,
+      progress: 100,
+      operations_complete: applied,
+      current_phase: phaseText
+    });
+    writeAuditLogEntry({ ...auditBase(file), editsReturned: aiResponse.edits.length, editsApplied: applied, editsSkipped: skipped, status: 'success' });
 
   } catch (error) {
+    const isKnownError = error.message && !(error instanceof TypeError) && !(error instanceof ReferenceError);
+    if (!isKnownError) console.error('[VibeLegal] processDocument error:', error);
     state.review.job.status = JOB_STATUS.ERROR;
-    let userMessage;
-    if (error.message && !(error instanceof TypeError) && !(error instanceof ReferenceError)) {
-      userMessage = error.message;
-    } else {
-      console.error('[VibeLegal] processDocument error:', error);
-      userMessage = 'An error occurred while processing your document. Please try again.';
-    }
-    state.review.job.errors = [userMessage];
-    writeAuditLogEntry({ filename: file.name, fileSizeBytes: file.size, provider: state.settings.provider, model: state.settings.model, editsReturned: 0, status: 'error' });
+    state.review.job.errors = [isKnownError ? error.message : 'An error occurred while processing your document. Please try again.'];
+    writeAuditLogEntry({ ...auditBase(file), editsReturned: 0, status: 'error' });
     render();
   }
 }
 
-// ============================================================================
-// BATCH PROCESSING
-// ============================================================================
-
 async function processBatch() {
-  const { files, jobs } = state.batch;
+  const { files } = state.batch;
   const playbook = state.playbooks.find(p => p.id === state.selectedPlaybookId);
 
-  if (!files.length) {
-    alert('Please upload at least one contract file');
-    return;
-  }
-
+  if (!files.length) { alert('Please upload at least one contract file'); return; }
   if (!state.settings.apiKey) {
     alert('Please configure your API key in Settings');
     state.currentPage = 'settings';
     render();
     return;
   }
-
-  if (!playbook) {
-    alert('Please select a playbook');
-    return;
-  }
+  if (!playbook) { alert('Please select a playbook'); return; }
 
   state.batch.isProcessing = true;
-
-  // Initialize all jobs as queued
   state.batch.jobs = files.map((file, i) => ({
     id: Date.now().toString() + '-' + i,
     fileName: file.name,
@@ -279,11 +222,9 @@ async function processBatch() {
   }));
   render();
 
-  // Ensure engine is ready before processing any files
   try {
     await ensureEngineReady();
   } catch (err) {
-    // Mark all jobs as error
     for (const job of state.batch.jobs) {
       job.status = JOB_STATUS.ERROR;
       job.error = err.message || 'Engine failed to initialise.';
@@ -293,15 +234,11 @@ async function processBatch() {
     return;
   }
 
-  // Process sequentially
   for (let i = 0; i < files.length; i++) {
     const file = files[i];
     const job = state.batch.jobs[i];
 
-    job.status = JOB_STATUS.PROCESSING;
-    job.progress = 5;
-    job.phase = 'Reading document...';
-    render();
+    updateJob(job, { status: JOB_STATUS.PROCESSING, progress: 5, phase: 'Reading document...' });
 
     try {
       const arrayBuffer = await file.arrayBuffer();
@@ -311,29 +248,20 @@ async function processBatch() {
         throw new Error('Invalid file format. Please upload a valid .docx file.');
       }
 
-      // Extract text via Adeu
       const extractResp = await sendMsg({
         type: 'extract-text',
         contractBytes: Array.from(contractBytes)
       });
 
-      if (!extractResp || !extractResp.success) {
+      if (!extractResp?.success) {
         throw new Error(extractResp?.error || 'Failed to extract text from document.');
       }
 
       const contractText = extractResp.text;
+      if (!contractText?.trim()) throw new Error('Document appears to be empty.');
+      if (contractText.length > MAX_TEXT_LENGTH) throw new Error('Document text is too large for AI analysis.');
 
-      if (!contractText || contractText.trim().length === 0) {
-        throw new Error('Document appears to be empty.');
-      }
-
-      if (contractText.length > MAX_TEXT_LENGTH) {
-        throw new Error('Document text is too large for AI analysis.');
-      }
-
-      job.progress = 20;
-      job.phase = 'Analyzing with AI...';
-      render();
+      updateJob(job, { progress: 20, phase: 'Analyzing with AI...' });
 
       const aiResponse = await analyzeContract({
         provider: state.settings.provider,
@@ -343,57 +271,46 @@ async function processBatch() {
         playbookText: playbook.playbookText
       });
 
-      job.progress = 60;
       job.editCount = aiResponse.edits.length;
-      job.phase = `Found ${aiResponse.edits.length} changes. Applying redlines...`;
-      render();
+      updateJob(job, { progress: 60, phase: `Found ${aiResponse.edits.length} changes. Applying redlines...` });
 
       if (aiResponse.edits.length === 0) {
-        job.status = JOB_STATUS.COMPLETE;
-        job.progress = 100;
-        job.phase = 'No changes needed';
-        writeAuditLogEntry({ filename: file.name, fileSizeBytes: file.size, provider: state.settings.provider, model: state.settings.model, editsReturned: 0, status: 'success' });
-        render();
+        updateJob(job, { status: JOB_STATUS.COMPLETE, progress: 100, phase: 'No changes needed' });
+        writeAuditLogEntry({ ...auditBase(file), editsReturned: 0, status: 'success' });
         continue;
       }
 
-      job.progress = 80;
-      job.phase = 'Applying track changes...';
-      render();
+      updateJob(job, { progress: 80, phase: 'Applying track changes...' });
 
-      // Apply edits via Adeu
       const applyResp = await sendMsg({
         type: 'apply-edits',
         contractBytes: Array.from(contractBytes),
         edits: aiResponse.edits
       });
 
-      if (applyResp && applyResp.success) {
-        job.result = new Uint8Array(applyResp.result);
-        job.status = JOB_STATUS.COMPLETE;
-        job.progress = 100;
-        const applied = applyResp.applied ?? job.editCount;
-        const skipped = applyResp.skipped ?? 0;
-        if (skipped > 0) {
-          job.phase = `Complete — ${applied}/${applied + skipped} applied`;
-        } else {
-          job.phase = `Complete — ${applied} edits applied`;
-        }
-        writeAuditLogEntry({ filename: file.name, fileSizeBytes: file.size, provider: state.settings.provider, model: state.settings.model, editsReturned: job.editCount, editsApplied: applied, editsSkipped: skipped, status: 'success' });
-      } else {
+      if (!applyResp?.success) {
         throw new Error(applyResp?.error || 'Document processing failed.');
       }
+
+      const applied = applyResp.applied ?? job.editCount;
+      const skipped = applyResp.skipped ?? 0;
+      const phaseText = skipped > 0
+        ? `Complete — ${applied}/${applied + skipped} applied`
+        : `Complete — ${applied} edits applied`;
+
+      job.result = new Uint8Array(applyResp.result);
+      updateJob(job, { status: JOB_STATUS.COMPLETE, progress: 100, phase: phaseText });
+      writeAuditLogEntry({ ...auditBase(file), editsReturned: job.editCount, editsApplied: applied, editsSkipped: skipped, status: 'success' });
 
     } catch (error) {
       job.status = JOB_STATUS.ERROR;
       job.progress = 0;
       job.error = error.message || 'An error occurred while processing this document.';
-      writeAuditLogEntry({ filename: file.name, fileSizeBytes: file.size, provider: state.settings.provider, model: state.settings.model, editsReturned: job.editCount, status: 'error' });
+      writeAuditLogEntry({ ...auditBase(file), editsReturned: job.editCount, status: 'error' });
     }
 
     render();
 
-    // Small delay between files to avoid API rate limiting
     if (i < files.length - 1) {
       await new Promise(r => setTimeout(r, 2000));
     }
@@ -405,7 +322,7 @@ async function processBatch() {
 
 function downloadBatchFile(index) {
   const job = state.batch.jobs[index];
-  if (!job || !job.result) return;
+  if (!job?.result) return;
   const baseName = job.fileName.replace(/\.docx$/i, '');
   downloadFile(job.result, `redlined_${baseName}.docx`);
 }
@@ -413,7 +330,6 @@ function downloadBatchFile(index) {
 async function downloadAllBatch() {
   const completedJobs = state.batch.jobs
     .filter(job => job.status === JOB_STATUS.COMPLETE && job.result);
-
   if (!completedJobs.length) return;
 
   const zip = new JSZip();
@@ -434,13 +350,8 @@ async function downloadAllBatch() {
 }
 
 function addBatchFiles(newFiles) {
-  const currentCount = state.batch.files.length;
-  const available = MAX_BATCH_FILES - currentCount;
-
-  if (available <= 0) {
-    alert(`Maximum ${MAX_BATCH_FILES} files allowed.`);
-    return;
-  }
+  const available = MAX_BATCH_FILES - state.batch.files.length;
+  if (available <= 0) { alert(`Maximum ${MAX_BATCH_FILES} files allowed.`); return; }
 
   const validFiles = [];
   for (const file of newFiles) {
@@ -461,23 +372,14 @@ function addBatchFiles(newFiles) {
 
   if (validFiles.length > 0) {
     state.batch.files = [...state.batch.files, ...validFiles];
-    state.batch.jobs = []; // Reset jobs when files change
+    state.batch.jobs = [];
     render();
   }
 }
 
-// ============================================================================
-// PLAYBOOK MANAGEMENT
-// ============================================================================
-
 async function createPlaybook(name, description, fileContent) {
-  // Generate safe ID: lowercase, alphanumeric with dashes, must start with letter
   let id = name.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '');
-  // Ensure ID starts with a letter
-  if (!/^[a-z]/.test(id)) {
-    id = 'playbook-' + id;
-  }
-  // Add timestamp to ensure uniqueness
+  if (!/^[a-z]/.test(id)) id = 'playbook-' + id;
   id = id + '-' + Date.now().toString(36);
 
   let playbookText = description || `Custom playbook: ${name}`;
@@ -485,44 +387,28 @@ async function createPlaybook(name, description, fileContent) {
   if (fileContent) {
     try {
       await ensureEngineReady();
-      const bytes = new Uint8Array(fileContent);
       const resp = await sendMsg({
         type: 'extract-text',
-        contractBytes: Array.from(bytes),
+        contractBytes: Array.from(new Uint8Array(fileContent)),
         cleanView: true
       });
-      if (resp && resp.success && resp.text) {
-        playbookText = resp.text;
-      }
-    } catch (e) {
-      // Fall back to description if extraction fails
+      if (resp?.success && resp.text) playbookText = resp.text;
+    } catch {
       playbookText = description || `Custom playbook: ${name}`;
     }
   }
 
-  const newPlaybook = {
-    id,
-    name,
-    description: description || '',
-    playbookText,
-    isExample: false
-  };
-
-  state.playbooks.push(newPlaybook);
+  state.playbooks.push({ id, name, description: description || '', playbookText, isExample: false });
   saveSettings();
   render();
 }
 
 function deletePlaybook(id) {
   state.playbooks = state.playbooks.filter(p => p.id !== id);
-
   if (state.selectedPlaybookId === id) {
     state.selectedPlaybookId = state.playbooks.length > 0 ? state.playbooks[0].id : null;
   }
-  if (state.editingPlaybookId === id) {
-    state.editingPlaybookId = null;
-  }
-
+  if (state.editingPlaybookId === id) state.editingPlaybookId = null;
   saveSettings();
   render();
 }
@@ -535,23 +421,15 @@ function savePlaybookEdits() {
   const description = document.querySelector('[name="playbook-edit-description"]')?.value.trim();
   const playbookText = document.querySelector('[name="playbook-edit-text"]')?.value;
 
-  if (!name) {
-    alert('Playbook name cannot be empty');
-    return;
-  }
+  if (!name) { alert('Playbook name cannot be empty'); return; }
 
   playbook.name = name;
   playbook.description = description || '';
   playbook.playbookText = playbookText || '';
-
   saveSettings();
   state.editingPlaybookId = null;
   render();
 }
-
-// ============================================================================
-// MODAL
-// ============================================================================
 
 function showNewPlaybookModal() {
   const modal = document.createElement('div');
@@ -587,35 +465,23 @@ function showNewPlaybookModal() {
   `);
   document.body.appendChild(modal);
 
-  // Add click handlers
   modal.querySelector('#modal-close-btn').addEventListener('click', closeModal);
   modal.querySelector('#modal-cancel-btn').addEventListener('click', closeModal);
   modal.querySelector('#modal-create-btn').addEventListener('click', handleCreatePlaybook);
-
-  // Close when clicking outside modal content
-  modal.addEventListener('click', (e) => {
-    if (e.target === modal) {
-      closeModal();
-    }
-  });
+  modal.addEventListener('click', (e) => { if (e.target === modal) closeModal(); });
 }
 
-function handleCreatePlaybook() {
+async function handleCreatePlaybook() {
   const name = document.getElementById('playbook-name').value.trim();
   const desc = document.getElementById('playbook-desc').value.trim();
-  const fileInput = document.getElementById('playbook-file');
-  const file = fileInput?.files?.[0];
+  const file = document.getElementById('playbook-file')?.files?.[0];
 
-  if (!name) {
-    alert('Please enter a playbook name');
-    return;
-  }
+  if (!name) { alert('Please enter a playbook name'); return; }
 
   if (file) {
-    file.arrayBuffer().then(buffer => {
-      createPlaybook(name, desc, buffer);
-      closeModal();
-    });
+    const buffer = await file.arrayBuffer();
+    createPlaybook(name, desc, buffer);
+    closeModal();
   } else if (desc) {
     createPlaybook(name, desc, null);
     closeModal();
@@ -623,10 +489,6 @@ function handleCreatePlaybook() {
     alert('Please enter playbook rules or upload a document');
   }
 }
-
-// ============================================================================
-// EVENT HANDLERS
-// ============================================================================
 
 function handleClick(e) {
   const target = e.target.closest('[data-action]');
@@ -639,11 +501,9 @@ function handleClick(e) {
       state.currentPage = target.dataset.page;
       render();
       break;
-
     case 'upload-contract':
       document.getElementById('contract-input').click();
       break;
-
     case 'clear-contract':
       state.review.file = null;
       state.review.job = null;
@@ -651,55 +511,42 @@ function handleClick(e) {
       state.review.edits = null;
       render();
       break;
-
     case 'process':
       processDocument();
       break;
-
     case 'download':
       if (state.review.result && state.review.file) {
         const baseName = state.review.file.name.replace(/\.docx$/i, '');
         downloadFile(state.review.result, `redlined_${baseName}.docx`);
       }
       break;
-
     case 'edit-playbook':
       state.editingPlaybookId = target.dataset.id;
       render();
       break;
-
     case 'back-to-playbooks':
       state.editingPlaybookId = null;
       render();
       break;
-
     case 'save-playbook':
       savePlaybookEdits();
       break;
-
     case 'select-playbook':
       state.selectedPlaybookId = target.dataset.id;
       render();
       break;
-
     case 'test-connection':
       handleTestConnection();
       break;
-
     case 'new-playbook':
       showNewPlaybookModal();
       break;
-
     case 'delete-playbook':
-      if (confirm('Delete this playbook? This cannot be undone.')) {
-        deletePlaybook(target.dataset.id);
-      }
+      if (confirm('Delete this playbook? This cannot be undone.')) deletePlaybook(target.dataset.id);
       break;
-
     case 'batch-upload':
       document.getElementById('batch-file-input').click();
       break;
-
     case 'batch-remove': {
       const idx = parseInt(target.dataset.index, 10);
       state.batch.files.splice(idx, 1);
@@ -707,39 +554,32 @@ function handleClick(e) {
       render();
       break;
     }
-
     case 'batch-clear':
       state.batch.files = [];
       state.batch.jobs = [];
       state.batch.isProcessing = false;
       render();
       break;
-
     case 'batch-process':
       processBatch();
       break;
-
     case 'batch-download': {
       const dlIdx = parseInt(target.dataset.index, 10);
       downloadBatchFile(dlIdx);
       break;
     }
-
     case 'batch-download-all':
       downloadAllBatch();
       break;
-
     case 'export-audit-log':
       exportAuditLog();
       break;
-
     case 'clear-audit-log':
       if (confirm('Delete all audit log entries? This cannot be undone.')) {
         clearAuditLog();
         render();
       }
       break;
-
     case 'dismiss-disclaimer':
       state.disclaimerAcknowledged = true;
       chrome.storage.local.set({ disclaimerAcknowledged: true });
@@ -753,14 +593,8 @@ function handleChange(e) {
 
   if (name === 'contract' && files?.length) {
     const file = files[0];
-    if (!file.name.toLowerCase().endsWith('.docx')) {
-      alert('Please select a .docx file');
-      return;
-    }
-    if (file.size > MAX_FILE_SIZE) {
-      alert('File is too large. Maximum size is 50MB.');
-      return;
-    }
+    if (!file.name.toLowerCase().endsWith('.docx')) { alert('Please select a .docx file'); return; }
+    if (file.size > MAX_FILE_SIZE) { alert('File is too large. Maximum size is 50MB.'); return; }
     state.review.file = file;
     state.review.job = null;
     state.review.result = null;
@@ -772,7 +606,6 @@ function handleChange(e) {
     state.settings.provider = value;
     state.connectionTested = false;
     state.availableModels = [];
-    // Set default model for provider
     const provider = AI_PROVIDERS[value];
     const defaultModel = provider?.models?.find(m => m.default);
     state.settings.model = defaultModel?.id || provider?.models?.[0]?.id || '';
@@ -781,30 +614,10 @@ function handleChange(e) {
     return;
   }
 
-  if (name === 'apiKey') {
-    state.settings.apiKey = value;
-    state.connectionTested = false;
-    saveSettings();
-    return;
-  }
-
-  if (name === 'rememberApiKey') {
-    state.rememberApiKey = e.target.checked;
-    saveSettings();
-    return;
-  }
-
-  if (name === 'model') {
-    state.settings.model = value;
-    saveSettings();
-    return;
-  }
-
-  if (name === 'playbook-select') {
-    state.selectedPlaybookId = value;
-    render();
-    return;
-  }
+  if (name === 'apiKey') { state.settings.apiKey = value; state.connectionTested = false; saveSettings(); return; }
+  if (name === 'rememberApiKey') { state.rememberApiKey = e.target.checked; saveSettings(); return; }
+  if (name === 'model') { state.settings.model = value; saveSettings(); return; }
+  if (name === 'playbook-select') { state.selectedPlaybookId = value; render(); return; }
 
   if (name === 'auditRetentionDays') {
     state.auditRetentionDays = parseInt(value, 10);
@@ -816,7 +629,7 @@ function handleChange(e) {
 
   if (name === 'batch-files' && files?.length) {
     addBatchFiles(Array.from(files));
-    e.target.value = ''; // Reset so same files can be re-selected
+    e.target.value = '';
     return;
   }
 }
@@ -827,25 +640,17 @@ function handleDrop(e) {
   if (!dropZone) return;
 
   dropZone.classList.remove('dragover');
+  const droppedFiles = e.dataTransfer.files;
+  if (!droppedFiles.length) return;
 
-  const files = e.dataTransfer.files;
-  if (!files.length) return;
-
-  // Check if this is the batch upload zone
   if (dropZone.classList.contains('batch-upload-zone')) {
-    addBatchFiles(Array.from(files));
+    addBatchFiles(Array.from(droppedFiles));
     return;
   }
 
-  const file = files[0];
-  if (!file.name.toLowerCase().endsWith('.docx')) {
-    alert('Please drop a .docx file');
-    return;
-  }
-  if (file.size > MAX_FILE_SIZE) {
-    alert('File is too large. Maximum size is 50MB.');
-    return;
-  }
+  const file = droppedFiles[0];
+  if (!file.name.toLowerCase().endsWith('.docx')) { alert('Please drop a .docx file'); return; }
+  if (file.size > MAX_FILE_SIZE) { alert('File is too large. Maximum size is 50MB.'); return; }
 
   state.review.file = file;
   state.review.job = null;
@@ -853,15 +658,10 @@ function handleDrop(e) {
   render();
 }
 
-// ============================================================================
-// INITIALIZATION
-// ============================================================================
-
 async function init() {
   await loadSettings();
   purgeOldAuditEntries();
 
-  // Listen for engine-ready broadcasts (e.g. from another tab triggering init)
   chrome.runtime.onMessage.addListener((message) => {
     if (message.type === 'engine-ready') {
       state.pyodideReady = true;
@@ -869,24 +669,21 @@ async function init() {
     }
   });
 
-  // Eagerly start engine init so it's ready by the time user uploads a file
-  ensureEngineReady().catch(() => {
-    // Silently swallow — will retry when user triggers processing
-  });
+  ensureEngineReady().catch(() => {});
 
-  // Event listeners
-  document.getElementById('app').addEventListener('click', handleClick);
-  document.getElementById('app').addEventListener('change', handleChange);
-  document.getElementById('app').addEventListener('dragover', (e) => {
+  const app = document.getElementById('app');
+  app.addEventListener('click', handleClick);
+  app.addEventListener('change', handleChange);
+  app.addEventListener('dragover', (e) => {
     e.preventDefault();
     const dropZone = e.target.closest('.file-upload');
     if (dropZone) dropZone.classList.add('dragover');
   });
-  document.getElementById('app').addEventListener('dragleave', (e) => {
+  app.addEventListener('dragleave', (e) => {
     const dropZone = e.target.closest('.file-upload');
     if (dropZone) dropZone.classList.remove('dragover');
   });
-  document.getElementById('app').addEventListener('drop', handleDrop);
+  app.addEventListener('drop', handleDrop);
 
   render();
 }

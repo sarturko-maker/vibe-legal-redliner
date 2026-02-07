@@ -1,62 +1,35 @@
-/**
- * State management and storage helpers
- */
-
 import { DEFAULT_PLAYBOOKS } from './config.js';
 
-// ============================================================================
-// STATE
-// ============================================================================
-
 export const state = {
-  // Navigation
   currentPage: 'review',
-
-  // Settings
   settings: {
     provider: 'gemini',
     apiKey: '',
     model: 'gemini-2.0-flash-exp',
     engine: 'adeu'
   },
-
-  // Playbooks (seeded from DEFAULT_PLAYBOOKS on first install, then stored)
   playbooks: [],
   selectedPlaybookId: 'nda-standard',
   editingPlaybookId: null,
-
-  // Review page
   review: {
     file: null,
     job: null,
     result: null
   },
-
-  // Batch page
   batch: {
-    files: [],          // Array of File objects (max 5)
-    jobs: [],           // Array of { id, fileName, fileSize, status, progress, phase, editCount, result, error }
-    isProcessing: false  // True while the sequential queue is running
+    files: [],
+    jobs: [],
+    isProcessing: false
   },
-
-  // UI state
   pyodideReady: false,
   connectionTested: false,
   availableModels: [],
   isTestingConnection: false,
   rememberApiKey: true,
-
-  // Disclaimer
   disclaimerAcknowledged: false,
-
-  // Audit log
   auditLog: [],
   auditRetentionDays: 30
 };
-
-// ============================================================================
-// STORAGE HELPERS
-// ============================================================================
 
 export async function loadSettings() {
   return new Promise((resolve) => {
@@ -65,22 +38,18 @@ export async function loadSettings() {
         state.settings = { ...state.settings, ...result.settings };
       }
 
-      // Load playbooks from storage, seeding examples on first install
       if (Array.isArray(result.playbooks) && result.playbooks.length > 0) {
         state.playbooks = result.playbooks;
       } else if (Array.isArray(result.customPlaybooks) && result.customPlaybooks.length > 0) {
-        // Migrate pre-refactor format: merge examples + user playbooks
         state.playbooks = [...DEFAULT_PLAYBOOKS, ...result.customPlaybooks];
         chrome.storage.local.set({ playbooks: state.playbooks });
         chrome.storage.local.remove('customPlaybooks');
       } else {
-        // First install — seed example playbooks
         state.playbooks = DEFAULT_PLAYBOOKS.map(p => ({ ...p }));
         chrome.storage.local.set({ playbooks: state.playbooks });
       }
 
-      // Validate selected playbook still exists
-      if (state.playbooks.length > 0 && !state.playbooks.find(p => p.id === state.selectedPlaybookId)) {
+      if (state.playbooks.length > 0 && !state.playbooks.some(p => p.id === state.selectedPlaybookId)) {
         state.selectedPlaybookId = state.playbooks[0].id;
       }
 
@@ -93,7 +62,6 @@ export async function loadSettings() {
         state.auditRetentionDays = result.auditRetentionDays;
       }
 
-      // Load API key from the appropriate storage area
       const keyStorage = state.rememberApiKey ? chrome.storage.local : chrome.storage.session;
       keyStorage.get(['apiKey'], (keyResult) => {
         if (keyResult.apiKey) {
@@ -114,7 +82,6 @@ export function saveSettings() {
     rememberApiKey: state.rememberApiKey
   });
 
-  // Store API key in the correct area and clear the other
   if (state.rememberApiKey) {
     chrome.storage.local.set({ apiKey });
     chrome.storage.session.remove('apiKey');
@@ -123,10 +90,6 @@ export function saveSettings() {
     chrome.storage.local.remove('apiKey');
   }
 }
-
-// ============================================================================
-// AUDIT LOG
-// ============================================================================
 
 export async function hashFilename(filename) {
   const data = new TextEncoder().encode(filename);
@@ -137,11 +100,9 @@ export async function hashFilename(filename) {
 
 export function purgeOldAuditEntries() {
   const cutoff = Date.now() - (state.auditRetentionDays * 24 * 60 * 60 * 1000);
-  const before = state.auditLog.length;
-  state.auditLog = state.auditLog.filter(
-    entry => new Date(entry.timestamp).getTime() > cutoff
-  );
-  if (state.auditLog.length !== before) {
+  const prevLength = state.auditLog.length;
+  state.auditLog = state.auditLog.filter(e => new Date(e.timestamp).getTime() > cutoff);
+  if (state.auditLog.length !== prevLength) {
     chrome.storage.local.set({ auditLog: state.auditLog });
   }
 }
@@ -151,7 +112,6 @@ export const MAX_AUDIT_ENTRIES = 500;
 export async function writeAuditLogEntry({ filename, fileSizeBytes, provider, model, editsReturned, status }) {
   purgeOldAuditEntries();
 
-  // Enforce max entries — drop oldest when full
   while (state.auditLog.length >= MAX_AUDIT_ENTRIES) {
     state.auditLog.shift();
   }

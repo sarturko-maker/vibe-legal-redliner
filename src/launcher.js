@@ -1,23 +1,11 @@
-/**
- * Launcher Popup Script
- * Handles mode selection and preference saving
- */
-
 import { safeSetHTML } from './trusted-html.js';
 
-// Check for saved preference and auto-open if set
 async function checkSavedPreference() {
-  const result = await chrome.storage.local.get(['preferredView']);
-  if (result.preferredView) {
-    if (result.preferredView === 'sidepanel') {
-      openSidePanel();
-    } else if (result.preferredView === 'fullscreen') {
-      openFullScreen();
-    }
-  }
+  const { preferredView } = await chrome.storage.local.get(['preferredView']);
+  if (preferredView === 'sidepanel') openSidePanel();
+  else if (preferredView === 'fullscreen') openFullScreen();
 }
 
-// Open Side Panel
 async function openSidePanel() {
   try {
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
@@ -25,27 +13,23 @@ async function openSidePanel() {
       await chrome.sidePanel.open({ windowId: tab.windowId });
     }
     window.close();
-  } catch (error) {
-    // Fallback to full screen if side panel fails
+  } catch {
     openFullScreen();
   }
 }
 
-// Open Full Screen Tab
 function openFullScreen() {
   chrome.tabs.create({ url: 'app.html' });
   window.close();
 }
 
-// Save preference
 function savePreference(view) {
   const rememberCheckbox = document.getElementById('remember-choice');
-  if (rememberCheckbox && rememberCheckbox.checked) {
+  if (rememberCheckbox?.checked) {
     chrome.storage.local.set({ preferredView: view });
   }
 }
 
-// Update engine status display
 function updateEngineStatus(ready) {
   const statusEl = document.getElementById('engine-status');
   if (ready) {
@@ -63,30 +47,23 @@ function updateEngineStatus(ready) {
   }
 }
 
-// Check engine status
 function checkEngineStatus() {
   chrome.runtime.sendMessage({ type: 'check-engine-status' }, (response) => {
     if (chrome.runtime.lastError) return;
-    updateEngineStatus(response && response.ready);
+    updateEngineStatus(response?.ready);
   });
 }
 
-// Listen for engine ready
 chrome.runtime.onMessage.addListener((message) => {
   if (message.type === 'engine-ready') {
     updateEngineStatus(true);
   }
 });
 
-// Initialize
 document.addEventListener('DOMContentLoaded', () => {
-  // Check for saved preference
   checkSavedPreference();
-
-  // Check engine status once (no polling — engine loads on demand)
   checkEngineStatus();
 
-  // Event listeners
   document.getElementById('open-sidepanel').addEventListener('click', () => {
     savePreference('sidepanel');
     openSidePanel();
@@ -97,11 +74,10 @@ document.addEventListener('DOMContentLoaded', () => {
     openFullScreen();
   });
 
-  // Load saved remember preference
   chrome.storage.local.get(['preferredView'], (result) => {
-    const checkbox = document.getElementById('remember-choice');
-    if (result.preferredView && checkbox) {
-      checkbox.checked = true;
+    if (result.preferredView) {
+      const checkbox = document.getElementById('remember-choice');
+      if (checkbox) checkbox.checked = true;
     }
   });
 });

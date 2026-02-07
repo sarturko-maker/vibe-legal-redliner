@@ -1,7 +1,3 @@
-/**
- * API connection testing handler
- */
-
 import { state, saveSettings } from './state.js';
 import { testConnection } from './utils/ai-bundle.js';
 import { render } from './ui.js';
@@ -20,8 +16,7 @@ export async function handleTestConnection() {
 
   if (result.success) {
     state.availableModels = result.models;
-    // Set default model if current not in list
-    if (!result.models.find(m => m.id === state.settings.model) && result.models.length > 0) {
+    if (result.models.length > 0 && !result.models.some(m => m.id === state.settings.model)) {
       state.settings.model = result.models[0].id;
     }
   } else {

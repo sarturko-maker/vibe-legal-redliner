@@ -1,8 +1,3 @@
-/**
- * Configuration and constants for Vibe Legal Extension
- */
-
-// Default playbooks matching server
 export const DEFAULT_PLAYBOOKS = [
   {
     id: 'nda-standard',
@@ -144,7 +139,6 @@ export const DEFAULT_PLAYBOOKS = [
   }
 ];
 
-// AI Provider configurations
 export const AI_PROVIDERS = {
   gemini: {
     id: 'gemini',
@@ -170,7 +164,6 @@ export const AI_PROVIDERS = {
   }
 };
 
-// Job statuses
 export const JOB_STATUS = {
   QUEUED: 'queued',
   PROCESSING: 'processing',

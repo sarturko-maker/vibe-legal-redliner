@@ -1,15 +1,5 @@
-/**
- * AI Client for contract analysis
- * Supports Google Gemini and OpenRouter APIs via a provider abstraction layer.
- * Non-module version for Chrome extension
- */
-
-// API request timeout (2 minutes)
 const API_TIMEOUT = 120000;
 
-/**
- * Fetch with timeout
- */
 async function fetchWithTimeout(url, options, timeout = API_TIMEOUT) {
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), timeout);
@@ -25,11 +15,9 @@ async function fetchWithTimeout(url, options, timeout = API_TIMEOUT) {
   }
 }
 
-// Base system prompt for contract analysis
 const AI_BASE_PROMPT = `You are a legal document reviewer. Analyze this contract against the playbook rules.
 Return ONLY a valid JSON object with your suggested edits. No markdown, no explanation, no code blocks.`;
 
-// Detailed analysis instructions
 const AI_ANALYSIS_INSTRUCTIONS = `
 ## Your Task
 Analyze the CONTRACT against the PLAYBOOK rules and suggest specific text changes.
@@ -121,10 +109,6 @@ Consider this revision history when analyzing the contract. It provides context 
 - When in doubt, err on the side of caution and explain in the comment
 `;
 
-/**
- * Validate model ID for safe URL interpolation.
- * Only allows alphanumeric characters, hyphens, dots, and underscores.
- */
 const SAFE_MODEL_ID = /^[a-zA-Z0-9._-]+$/;
 
 function validateModelId(model) {
@@ -133,15 +117,6 @@ function validateModelId(model) {
   }
 }
 
-// ---------------------------------------------------------------------------
-// Provider abstraction layer
-// ---------------------------------------------------------------------------
-
-/**
- * Request format handlers.
- * Each format knows how to build a request body and extract the content
- * from the provider's response shape.
- */
 const REQUEST_FORMATS = {
   gemini: {
     buildBody(systemMessage, userPrompt) {
@@ -173,10 +148,6 @@ const REQUEST_FORMATS = {
   }
 };
 
-/**
- * Built-in provider presets.
- * Each preset defines how to build a provider config for that service.
- */
 const PROVIDER_PRESETS = {
   gemini: {
     name: 'Gemini',
@@ -223,11 +194,6 @@ const PROVIDER_PRESETS = {
   }
 };
 
-/**
- * Build a flat provider config from a preset, API key, and model.
- * Returns an object with: name, endpointUrl, authHeaderName,
- * authHeaderValue, requestFormat, modelId.
- */
 function buildProviderConfig(providerKey, apiKey, model) {
   const preset = PROVIDER_PRESETS[providerKey];
   if (!preset) {
@@ -244,9 +210,6 @@ function buildProviderConfig(providerKey, apiKey, model) {
   };
 }
 
-/**
- * Send a request to any provider through a single code path.
- */
 async function sendRequest(config, prompt) {
   const format = REQUEST_FORMATS[config.requestFormat];
   if (!format) {
@@ -282,7 +245,6 @@ async function sendRequest(config, prompt) {
   const content = format.extractContent(data);
 
   if (!content) {
-    // Gemini returns 200 but no content when safety filters block the response
     const blockReason = data.promptFeedback?.blockReason;
     const finishReason = data.candidates?.[0]?.finishReason;
 
@@ -300,53 +262,30 @@ async function sendRequest(config, prompt) {
   return parsed;
 }
 
-/**
- * Parse and validate AI response
- */
 function parseAIResponse(content) {
   let cleaned = content.trim();
 
-  // Remove markdown code blocks anywhere in the response
-  const codeBlockMatch = cleaned.match(/```(?:json)?\s*\n?([\s\S]*?)\n?```/);
-  if (codeBlockMatch) {
-    cleaned = codeBlockMatch[1].trim();
-  } else {
-    // Handle unclosed code block (response truncated before closing ```)
-    const openBlockMatch = cleaned.match(/```(?:json)?\s*\n?([\s\S]+)/);
-    if (openBlockMatch) {
-      cleaned = openBlockMatch[1].trim();
-    }
-  }
+  const codeBlockMatch = cleaned.match(/```(?:json)?\s*\n?([\s\S]*?)(?:\n?```|$)/);
+  if (codeBlockMatch) cleaned = codeBlockMatch[1].trim();
 
-  // Try to extract JSON object
   const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
-  if (jsonMatch) {
-    cleaned = jsonMatch[0];
-  }
+  if (jsonMatch) cleaned = jsonMatch[0];
 
-  // Sanitize control characters that break JSON parsing
-  cleaned = cleaned.replace(/[\x00-\x1F\x7F]/g, (char) => {
-    if (char === '\n' || char === '\r' || char === '\t') return char;
-    return '';
-  });
+  cleaned = cleaned.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '');
 
-  // Attempt 1: direct parse
   const parsed = tryParseJSON(cleaned);
   if (parsed) return validateEdits(parsed);
 
-  // Attempt 2: fix trailing commas (common AI mistake)
   const fixedCommas = cleaned.replace(/,\s*([}\]])/g, '$1');
   const parsed2 = tryParseJSON(fixedCommas);
   if (parsed2) return validateEdits(parsed2);
 
-  // Attempt 3: truncated JSON — close open brackets/braces
   const repaired = repairTruncatedJSON(fixedCommas);
   if (repaired) {
     const parsed3 = tryParseJSON(repaired);
     if (parsed3) return validateEdits(parsed3);
   }
 
-  // Attempt 4: extract individual edit objects via regex
   const rescued = rescueEdits(cleaned);
   if (rescued.length > 0) {
     return {
@@ -359,16 +298,12 @@ function parseAIResponse(content) {
   throw new Error('Failed to parse AI response. Try a different model or simplify the playbook.\n\nAI returned: ' + preview);
 }
 
-/** Try JSON.parse, return null on failure */
 function tryParseJSON(str) {
   try { return JSON.parse(str); } catch { return null; }
 }
 
-/** Validate and normalize a parsed response */
 function validateEdits(parsed) {
-  if (!parsed.edits || !Array.isArray(parsed.edits)) {
-    return { edits: [], summary: 'Invalid response format - no edits array' };
-  }
+  if (!Array.isArray(parsed.edits)) return { edits: [], summary: 'Invalid response format - no edits array' };
   const validEdits = parsed.edits
     .filter(edit => typeof edit.target_text === 'string' && typeof edit.new_text === 'string')
     .map(edit => ({
@@ -382,16 +317,10 @@ function validateEdits(parsed) {
   };
 }
 
-/** Try to close truncated JSON by appending missing brackets/braces */
 function repairTruncatedJSON(str) {
-  // Remove any trailing incomplete string value (text cut off mid-string)
   let repaired = str.replace(/,\s*"[^"]*":\s*"[^"]*$/, '');
-  if (repaired === str) {
-    // Also try removing a trailing incomplete object
-    repaired = str.replace(/,\s*\{[^}]*$/, '');
-  }
+  if (repaired === str) repaired = str.replace(/,\s*\{[^}]*$/, '');
 
-  // Count unmatched openers and close them
   const stack = [];
   let inString = false;
   let escaped = false;
@@ -404,16 +333,13 @@ function repairTruncatedJSON(str) {
     if (ch === '}' || ch === ']') stack.pop();
   }
 
-  if (stack.length === 0) return null; // Not truncated
-  // Close in reverse order
+  if (stack.length === 0) return null;
   const closers = stack.reverse().map(ch => ch === '{' ? '}' : ']').join('');
   return repaired + closers;
 }
 
-/** Last resort: regex-extract individual complete edit objects */
 function rescueEdits(str) {
   const edits = [];
-  // Match objects containing target_text and new_text
   const pattern = /\{\s*"target_text"\s*:\s*"((?:[^"\\]|\\.)*)"\s*,\s*"new_text"\s*:\s*"((?:[^"\\]|\\.)*)"\s*(?:,\s*"comment"\s*:\s*"((?:[^"\\]|\\.)*)")?\s*\}/g;
   let m;
   while ((m = pattern.exec(str)) !== null) {
@@ -424,45 +350,35 @@ function rescueEdits(str) {
         comment: m[3] ? JSON.parse('"' + m[3] + '"') : ''
       });
     } catch {
-      // Skip malformed individual edit
+      // skip malformed edit
     }
   }
   return edits;
 }
 
-/**
- * Simple sliding-window rate limiter.
- * Tracks timestamps of recent API calls and waits if the limit is reached.
- */
 const RATE_LIMIT_MAX = 10;
-const RATE_LIMIT_WINDOW_MS = 60 * 1000;
+const RATE_LIMIT_WINDOW_MS = 60_000;
 const _rateLimitTimestamps = [];
 
-async function enforceRateLimit() {
-  const now = Date.now();
-
-  // Discard timestamps outside the window
-  while (_rateLimitTimestamps.length > 0 && _rateLimitTimestamps[0] <= now - RATE_LIMIT_WINDOW_MS) {
+function pruneExpiredTimestamps() {
+  const cutoff = Date.now() - RATE_LIMIT_WINDOW_MS;
+  while (_rateLimitTimestamps.length > 0 && _rateLimitTimestamps[0] <= cutoff) {
     _rateLimitTimestamps.shift();
   }
+}
+
+async function enforceRateLimit() {
+  pruneExpiredTimestamps();
 
   if (_rateLimitTimestamps.length >= RATE_LIMIT_MAX) {
-    const waitMs = _rateLimitTimestamps[0] + RATE_LIMIT_WINDOW_MS - now;
-    console.log(`Rate limit reached, waiting ${Math.ceil(waitMs / 1000)}s...`);
+    const waitMs = _rateLimitTimestamps[0] + RATE_LIMIT_WINDOW_MS - Date.now();
     await new Promise(resolve => setTimeout(resolve, waitMs));
-    // Clean up again after waiting
-    const after = Date.now();
-    while (_rateLimitTimestamps.length > 0 && _rateLimitTimestamps[0] <= after - RATE_LIMIT_WINDOW_MS) {
-      _rateLimitTimestamps.shift();
-    }
+    pruneExpiredTimestamps();
   }
 
   _rateLimitTimestamps.push(Date.now());
 }
 
-/**
- * Main entry point - analyze contract with selected provider
- */
 export async function analyzeContract({ provider, apiKey, model, contractText, playbookText }) {
   if (!apiKey) {
     throw new Error('No API key configured. Please add your API key in Settings before analyzing a contract.');
@@ -496,12 +412,7 @@ Analyze this contract against the playbook rules above. Return ONLY a JSON objec
   });
 }
 
-/**
- * Test API connection and fetch available models
- */
 export async function testConnection({ provider, apiKey }) {
-  const TEST_TIMEOUT = 15000; // 15 seconds for connection test
-
   const preset = PROVIDER_PRESETS[provider];
   if (!preset) {
     return { success: false, error: 'Unknown provider' };
@@ -511,7 +422,7 @@ export async function testConnection({ provider, apiKey }) {
     const response = await fetchWithTimeout(
       preset.testEndpointUrl,
       { headers: { [preset.authHeaderName]: preset.buildAuthValue(apiKey) } },
-      TEST_TIMEOUT
+      15000
     );
 
     if (!response.ok) {
@@ -529,7 +440,6 @@ export async function testConnection({ provider, apiKey }) {
   }
 }
 
-// Exported for unit testing — not part of the public API
 export { parseAIResponse as _parseAIResponse };
 export { validateModelId as _validateModelId };
 export { enforceRateLimit as _enforceRateLimit };
