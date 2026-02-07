@@ -6,7 +6,7 @@ Vibe Legal is a Chrome extension that redlines legal contracts using AI. The doc
 
 **Local processing.** Contract and playbook files are parsed entirely within the browser using Pyodide (CPython compiled to WebAssembly) running in a Chrome extension offscreen document. No backend server is involved. Document bytes exist only in RAM and are never written to disk or transmitted to any server controlled by this project.
 
-**AI provider (single external data flow).** Extracted contract text is sent to the user's chosen AI provider (Google Gemini or OpenRouter) for analysis. The user supplies their own API key (BYOK). This is the only point where data leaves the browser and represents the sole trust boundary.
+**AI provider (single external data flow).** Extracted contract text is sent to a third-party AI provider for analysis. The user supplies their own API key (BYOK). With Google Gemini, requests go directly to Google. With OpenRouter, requests go to OpenRouter which routes them to the underlying model provider (e.g. Anthropic, Google, Meta) — meaning text may be processed by two third parties. This is the only point where data leaves the browser and represents the sole trust boundary.
 
 **No data collection.** The extension has no backend, no analytics, no telemetry, and no crash reporting. It does not collect, store, or transmit any user data beyond the AI API call described above.
 

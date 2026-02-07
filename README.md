@@ -1,6 +1,6 @@
 # Vibe Legal Redliner
 
-100% client-side contract redlining Chrome extension. Your documents never leave your browser.
+100% client-side contract redlining Chrome extension. Your .docx files never leave your browser — extracted text is sent to your chosen AI provider for analysis.
 
 ## What It Does
 
@@ -45,7 +45,7 @@ Creates `vibe-legal-redliner-v{VERSION}.zip` containing only shipping files (no 
 
 ## Architecture
 
-Chrome Manifest V3 extension. Document processing runs client-side via [Pyodide](https://pyodide.org/) (CPython compiled to WebAssembly) in an offscreen document. The [Adeu](https://github.com/dealfluence/adeu) Python engine handles OOXML tracked-change generation. [JSZip](https://stuk.github.io/jszip/) handles .docx parsing. Contract text is sent to the user's chosen AI provider (Google Gemini or OpenRouter) for clause analysis — the user supplies their own API key. No backend, no analytics, no telemetry.
+Chrome Manifest V3 extension. Document processing runs client-side via [Pyodide](https://pyodide.org/) (CPython compiled to WebAssembly) in an offscreen document. The [Adeu](https://github.com/dealfluence/adeu) Python engine handles both text extraction and OOXML tracked-change generation. Contract text is sent to the user's chosen AI provider for clause analysis — the user supplies their own API key. With Google Gemini, requests go directly to Google. With OpenRouter, requests go to OpenRouter which routes them to the underlying model provider (e.g. Anthropic, Google, Meta). No backend, no analytics, no telemetry.
 
 ## Documentation
 
@@ -53,6 +53,7 @@ Chrome Manifest V3 extension. Document processing runs client-side via [Pyodide]
 - [CONTRIBUTING.md](CONTRIBUTING.md) — how to contribute
 - [SBOM.md](SBOM.md) — software bill of materials with SHA-256 hashes
 - [DEPENDENCIES.md](DEPENDENCIES.md) — bundled dependency versions and update procedures
+- [DEVELOPMENT_LOG.md](DEVELOPMENT_LOG.md) — architecture decision records (ADRs)
 - [Privacy Policy](privacy-policy.html)
 
 ## License
