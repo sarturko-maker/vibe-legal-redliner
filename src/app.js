@@ -1,4 +1,4 @@
-import { state, loadSettings, saveSettings, purgeOldAuditEntries, writeAuditLogEntry, clearAuditLog, exportAuditLog } from './state.js';
+import { state, loadSettings, saveSettings, loadApiKeyForProvider, purgeOldAuditEntries, writeAuditLogEntry, clearAuditLog, exportAuditLog } from './state.js';
 import { AI_PROVIDERS, JOB_STATUS } from './config.js';
 import { render, closeModal } from './ui.js';
 import { safeSetHTML } from './trusted-html.js';
@@ -92,6 +92,9 @@ async function processDocument() {
   state.review.result = null;
   render();
 
+  const t0 = Date.now();
+  console.log('[VL-DEBUG] Processing started', { fileName: file.name, fileSize: file.size, provider: state.settings.provider, model: state.settings.model });
+
   try {
     const arrayBuffer = await file.arrayBuffer();
     const contractBytes = new Uint8Array(arrayBuffer);
@@ -101,6 +104,7 @@ async function processDocument() {
     }
 
     await ensureEngineReady();
+    console.log('[VL-DEBUG] Engine ready', { elapsedMs: Date.now() - t0 });
     updateJob(state.review.job, { progress: 10, current_phase: 'Reading document...' });
 
     const extractResp = await sendMsg({
@@ -113,6 +117,8 @@ async function processDocument() {
     }
 
     const contractText = extractResp.text;
+    console.log('[VL-DEBUG] Text extracted', { textLength: contractText?.length, elapsedMs: Date.now() - t0 });
+
     if (!contractText?.trim()) {
       throw new Error('Document appears to be empty. Please upload a document with text content.');
     }
@@ -130,6 +136,7 @@ async function processDocument() {
       playbookText: playbook.playbookText
     });
 
+    console.log('[VL-DEBUG] AI analysis complete', { editCount: aiResponse.edits.length, elapsedMs: Date.now() - t0 });
     console.log('[VibeLegal] Raw AI response:', aiResponse.rawContent);
     console.log('[VibeLegal] Parsed edits:', aiResponse.edits);
     state.review.edits = aiResponse.edits;
@@ -157,7 +164,7 @@ async function processDocument() {
     if (!applyResp?.success) {
       state.review.job.status = JOB_STATUS.ERROR;
       state.review.job.errors = ['Document processing failed. Please try again.'];
-      writeAuditLogEntry({ ...auditBase(file), editsReturned: aiResponse.edits.length, status: 'error' });
+      writeAuditLogEntry({ ...auditBase(file), editsReturned: aiResponse.edits.length, status: 'error', errorMessage: 'Document processing failed' });
       render();
       return;
     }
@@ -165,6 +172,7 @@ async function processDocument() {
     const applied = applyResp.applied ?? aiResponse.edits.length;
     const skipped = applyResp.skipped ?? 0;
     state.review.result = new Uint8Array(applyResp.result);
+    console.log('[VL-DEBUG] Edits applied', { applied, skipped, elapsedMs: Date.now() - t0 });
 
     if (applyResp.statuses && state.review.edits) {
       state.review.edits = state.review.edits.map((edit, i) => ({
@@ -186,11 +194,12 @@ async function processDocument() {
     writeAuditLogEntry({ ...auditBase(file), editsReturned: aiResponse.edits.length, editsApplied: applied, editsSkipped: skipped, status: 'success' });
 
   } catch (error) {
+    console.error('[VL-DEBUG] processDocument failed', { error: error.message, elapsedMs: Date.now() - t0 });
     const isKnownError = error.message && !(error instanceof TypeError) && !(error instanceof ReferenceError);
     if (!isKnownError) console.error('[VibeLegal] processDocument error:', error);
     state.review.job.status = JOB_STATUS.ERROR;
     state.review.job.errors = [isKnownError ? error.message : 'An error occurred while processing your document. Please try again.'];
-    writeAuditLogEntry({ ...auditBase(file), editsReturned: 0, status: 'error' });
+    writeAuditLogEntry({ ...auditBase(file), editsReturned: 0, status: 'error', errorMessage: error.message });
     render();
   }
 }
@@ -609,8 +618,11 @@ function handleChange(e) {
     const provider = AI_PROVIDERS[value];
     const defaultModel = provider?.models?.find(m => m.default);
     state.settings.model = defaultModel?.id || provider?.models?.[0]?.id || '';
-    saveSettings();
-    render();
+    loadApiKeyForProvider(value).then((key) => {
+      state.settings.apiKey = key;
+      saveSettings();
+      render();
+    });
     return;
   }
 

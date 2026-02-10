@@ -1,8 +1,11 @@
 const API_TIMEOUT = 120000;
 
+let _lastRequestElapsedMs = 0;
+
 async function fetchWithTimeout(url, options, timeout = API_TIMEOUT) {
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), timeout);
+  const startTime = Date.now();
 
   try {
     const response = await fetch(url, {
@@ -10,7 +13,11 @@ async function fetchWithTimeout(url, options, timeout = API_TIMEOUT) {
       signal: controller.signal
     });
     return response;
+  } catch (error) {
+    _lastRequestElapsedMs = Date.now() - startTime;
+    throw error;
   } finally {
+    _lastRequestElapsedMs = Date.now() - startTime;
     clearTimeout(timeoutId);
   }
 }
@@ -231,15 +238,45 @@ async function sendRequest(config, prompt) {
     });
   } catch (error) {
     if (error.name === 'AbortError') {
+      console.warn(`[VL-DEBUG] API timeout after ${_lastRequestElapsedMs}ms (limit: ${API_TIMEOUT}ms)`, { url: config.endpointUrl });
       throw new Error('API request timed out. Please try again.');
     }
     throw new Error('Network error. Please check your connection and try again.');
   }
 
   if (!response.ok) {
-    const error = await response.json().catch(() => ({}));
-    throw new Error(error.error?.message || `${config.name} API error: ${response.status}`);
+    const status = response.status;
+    const retryAfter = response.headers.get('retry-after');
+    const rateLimitRemaining = response.headers.get('x-ratelimit-remaining-requests')
+      || response.headers.get('x-ratelimit-remaining-requests-per-minute');
+    const errorBody = await response.text().catch(() => '');
+    let errorObj = {};
+    try { errorObj = JSON.parse(errorBody); } catch {}
+
+    console.warn('[VL-DEBUG] API error response', {
+      status,
+      statusText: response.statusText,
+      retryAfter,
+      rateLimitRemaining,
+      body: errorBody.slice(0, 500)
+    });
+
+    if (status === 429) {
+      throw new Error(`Rate limited by ${config.name} (429). ${retryAfter ? `Retry after ${retryAfter}s.` : 'Please wait and try again.'}`);
+    }
+
+    const errorMessage = errorObj.error?.message || errorBody;
+    if (config.name === 'OpenRouter' && (status === 401 || status === 403 || /no user found|invalid.*key|unauthorized/i.test(errorMessage))) {
+      throw new Error('OpenRouter API key not recognised. Please check your key in Settings.');
+    }
+    throw new Error(errorObj.error?.message || `${config.name} API error: ${status}`);
   }
+
+  console.log('[VL-DEBUG] API response OK', {
+    elapsedMs: _lastRequestElapsedMs,
+    rateLimitRemaining: response.headers.get('x-ratelimit-remaining-requests')
+      || response.headers.get('x-ratelimit-remaining-requests-per-minute')
+  });
 
   const data = await response.json();
   const content = format.extractContent(data);
@@ -264,6 +301,7 @@ async function sendRequest(config, prompt) {
 
 function parseAIResponse(content) {
   let cleaned = content.trim();
+  let parseMethod = 'unknown';
 
   const codeBlockMatch = cleaned.match(/```(?:json)?\s*\n?([\s\S]*?)(?:\n?```|$)/);
   if (codeBlockMatch) cleaned = codeBlockMatch[1].trim();
@@ -274,20 +312,37 @@ function parseAIResponse(content) {
   cleaned = cleaned.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '');
 
   const parsed = tryParseJSON(cleaned);
-  if (parsed) return validateEdits(parsed);
+  if (parsed) {
+    parseMethod = 'direct';
+    const result = validateEdits(parsed);
+    console.log('[VL-DEBUG] AI response parsed', { parseMethod, editCount: result.edits.length });
+    return result;
+  }
 
   const fixedCommas = cleaned.replace(/,\s*([}\]])/g, '$1');
   const parsed2 = tryParseJSON(fixedCommas);
-  if (parsed2) return validateEdits(parsed2);
+  if (parsed2) {
+    parseMethod = 'trailing-comma-fix';
+    const result = validateEdits(parsed2);
+    console.log('[VL-DEBUG] AI response parsed', { parseMethod, editCount: result.edits.length });
+    return result;
+  }
 
   const repaired = repairTruncatedJSON(fixedCommas);
   if (repaired) {
     const parsed3 = tryParseJSON(repaired);
-    if (parsed3) return validateEdits(parsed3);
+    if (parsed3) {
+      parseMethod = 'truncation-repair';
+      const result = validateEdits(parsed3);
+      console.log('[VL-DEBUG] AI response parsed', { parseMethod, editCount: result.edits.length });
+      return result;
+    }
   }
 
   const rescued = rescueEdits(cleaned);
   if (rescued.length > 0) {
+    parseMethod = 'regex-rescue';
+    console.log('[VL-DEBUG] AI response parsed', { parseMethod, editCount: rescued.length });
     return {
       edits: rescued,
       summary: `Recovered ${rescued.length} edits from malformed response`
@@ -372,6 +427,7 @@ async function enforceRateLimit() {
 
   if (_rateLimitTimestamps.length >= RATE_LIMIT_MAX) {
     const waitMs = _rateLimitTimestamps[0] + RATE_LIMIT_WINDOW_MS - Date.now();
+    console.log(`[VL-DEBUG] Local rate limit reached, waiting ${Math.ceil(waitMs / 1000)}s`);
     await new Promise(resolve => setTimeout(resolve, waitMs));
     pruneExpiredTimestamps();
   }
@@ -396,7 +452,7 @@ export async function analyzeContract({ provider, apiKey, model, contractText, p
 
   const config = buildProviderConfig(provider, apiKey, model);
 
-  return sendRequest(config, {
+  const result = await sendRequest(config, {
     system: AI_BASE_PROMPT + AI_ANALYSIS_INSTRUCTIONS,
     user: `PLAYBOOK RULES:
 ${playbookText}
@@ -410,6 +466,14 @@ ${contractText}
 
 Analyze this contract against the playbook rules above. Return ONLY a JSON object with your suggested edits.`
   });
+
+  const playbookLines = playbookText.split('\n').filter(l => l.trim().length > 0);
+  console.log('[VL-DEBUG] AI edit coverage', {
+    playbookLines: playbookLines.length,
+    editsReturned: result.edits.length
+  });
+
+  return result;
 }
 
 export async function testConnection({ provider, apiKey }) {
@@ -419,6 +483,17 @@ export async function testConnection({ provider, apiKey }) {
   }
 
   try {
+    if (provider === 'openrouter') {
+      const authResp = await fetchWithTimeout(
+        'https://openrouter.ai/api/v1/auth/key',
+        { headers: { 'Authorization': `Bearer ${apiKey}` } },
+        15000
+      );
+      if (!authResp.ok) {
+        return { success: false, error: 'API key not recognised. Check your key starts with sk-or-v1-' };
+      }
+    }
+
     const response = await fetchWithTimeout(
       preset.testEndpointUrl,
       { headers: { [preset.authHeaderName]: preset.buildAuthValue(apiKey) } },

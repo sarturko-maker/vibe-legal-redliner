@@ -170,12 +170,17 @@ def process_document(docx_bytes: bytes, edits_json: str, author: str = 'Vibe Leg
         skipped = 0
 
         for orig_idx, edit in indexed:
+            preview = edit.target_text[:50].replace('\\n', ' ')
             a, _s = engine.apply_edits([edit])
             if a > 0:
                 statuses[orig_idx] = True
                 applied += 1
+                print(f"[VL-DEBUG] Edit #{orig_idx} APPLIED: \\"{preview}\\"")
             else:
                 skipped += 1
+                print(f"[VL-DEBUG] Edit #{orig_idx} SKIPPED: \\"{preview}\\"")
+
+        print(f"[VL-DEBUG] Edits summary: {applied} applied, {skipped} skipped out of {len(edits)} total")
 
         enable_track_changes(engine.doc)
         strip_comments(engine.doc)
@@ -200,6 +205,7 @@ def process_document(docx_bytes: bytes, edits_json: str, author: str = 'Vibe Leg
 async function processDocument(contractBytes, editsJson) {
   if (!ready) throw new Error('Pyodide not ready');
 
+  const startTime = Date.now();
   pyodide.globals.set('js_contract_bytes', contractBytes);
   pyodide.globals.set('js_edits_json', editsJson);
 
@@ -220,12 +226,18 @@ result
   pyodide.globals.delete('js_edits_json');
   await cleanupPythonVars('contract_bytes', 'result');
 
+  console.log('[VL-DEBUG] Adeu processing complete', {
+    applied, skipped, totalEdits: statuses.length,
+    elapsedMs: Date.now() - startTime
+  });
+
   return { outputBytes, applied, skipped, statuses };
 }
 
 async function extractText(contractBytes, cleanView) {
   if (!ready) throw new Error('Pyodide not ready');
 
+  const startTime = Date.now();
   pyodide.globals.set('js_extract_bytes', contractBytes);
   pyodide.globals.set('js_clean_view', cleanView);
 
@@ -237,6 +249,11 @@ extract_text(doc_bytes, clean_view=js_clean_view)
   pyodide.globals.delete('js_extract_bytes');
   pyodide.globals.delete('js_clean_view');
   await cleanupPythonVars('doc_bytes');
+
+  console.log('[VL-DEBUG] Text extraction complete', {
+    textLength: text.length,
+    elapsedMs: Date.now() - startTime
+  });
 
   return text;
 }

@@ -459,7 +459,7 @@ function renderSettingsPage() {
           <label class="form-label">API Key</label>
           <input type="password" class="form-input" name="apiKey"
             value="${escapeHtml(state.settings.apiKey)}"
-            placeholder="${isGemini ? 'AIza...' : 'sk-or-...'}">
+            placeholder="${isGemini ? 'Paste your Gemini API key' : 'Paste your OpenRouter key (sk-or-v1-...)'}">
           <p class="form-hint">
             ${isGemini
               ? 'Get your API key from <a href="https://aistudio.google.com/apikey" target="_blank">Google AI Studio</a>'
