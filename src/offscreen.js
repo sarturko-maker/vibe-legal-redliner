@@ -1,6 +1,5 @@
 let pyodide = null;
 let ready = false;
-let storedDocxBytes = null;
 
 async function loadAdeuSource() {
   const files = [
@@ -15,7 +14,8 @@ async function loadAdeuSource() {
     { path: 'python/adeu/redline/comments.py', dest: '/adeu/redline/comments.py' },
     { path: 'python/adeu/utils/__init__.py', dest: '/adeu/utils/__init__.py' },
     { path: 'python/adeu/utils/docx.py', dest: '/adeu/utils/docx.py' },
-    { path: 'python/adeu/VERSION', dest: '/adeu/VERSION' }
+    { path: 'python/adeu/VERSION', dest: '/adeu/VERSION' },
+    { path: 'python/pipeline.py', dest: '/pipeline.py' }
   ];
 
   pyodide.FS.mkdir('/adeu');
@@ -88,110 +88,7 @@ adeu.__version__
     console.log(`Adeu engine v${adeuVersion}`);
 
     await pyodide.runPythonAsync(`
-import json
-from io import BytesIO
-from adeu.models import DocumentEdit
-from adeu.redline.engine import RedlineEngine
-from adeu.ingest import extract_text_from_stream
-from docx.oxml.ns import qn
-from docx.oxml import OxmlElement
-
-def extract_text(docx_bytes: bytes, clean_view: bool = False) -> str:
-    stream = BytesIO(docx_bytes)
-    try:
-        return extract_text_from_stream(stream, clean_view=clean_view)
-    finally:
-        stream.close()
-
-def enable_track_changes(doc):
-    settings = doc.settings.element
-
-    if settings.find(qn('w:trackRevisions')) is None:
-        settings.append(OxmlElement('w:trackRevisions'))
-
-    for tag in ['w:revisionView', 'w:documentProtection', 'w:writeProtection', 'w:docFinal']:
-        for el in settings.findall(qn(tag)):
-            settings.remove(el)
-
-    body = doc.element.body
-    if body is not None:
-        for perm in body.xpath('//w:permStart | //w:permEnd'):
-            perm.getparent().remove(perm)
-        for lock in body.xpath('//w:lock'):
-            lock.getparent().remove(lock)
-
-def strip_comments(doc):
-    from docx.opc.constants import CONTENT_TYPE as CT_CONST
-    from docx.opc.constants import RELATIONSHIP_TYPE as RT_CONST
-
-    body = doc.element.body
-    if body is not None:
-        for tag in ['w:commentRangeStart', 'w:commentRangeEnd']:
-            for el in body.xpath(f'//{tag}'):
-                el.getparent().remove(el)
-        for ref in body.xpath('//w:commentReference'):
-            run = ref.getparent()
-            if run is not None and run.tag.endswith('}r'):
-                run.getparent().remove(run)
-            else:
-                ref.getparent().remove(ref)
-
-    comment_uri_patterns = ['comments', 'commentsExtended', 'commentsIds', 'commentsExtensible']
-    rels_to_remove = []
-    for rel_key, rel in doc.part.rels.items():
-        rel_type = rel.reltype or ''
-        partname = str(getattr(rel, '_target', None))
-        if (rel_type == RT_CONST.COMMENTS
-            or any(pat in partname.lower() for pat in comment_uri_patterns)
-            or 'comment' in rel_type.lower()):
-            rels_to_remove.append(rel_key)
-
-    for rel_key in rels_to_remove:
-        try:
-            target_part = doc.part.rels[rel_key].target_part
-            if target_part in doc.part.package.parts:
-                doc.part.package.parts.remove(target_part)
-        except Exception:
-            pass
-        del doc.part.rels[rel_key]
-
-def process_document(docx_bytes: bytes, edits_json: str, author: str = 'Vibe Legal') -> dict:
-    edits_data = json.loads(edits_json)
-    edits = [DocumentEdit(target_text=e.get('target_text', ''), new_text=e.get('new_text', '')) for e in edits_data]
-
-    input_stream = BytesIO(docx_bytes)
-    try:
-        engine = RedlineEngine(input_stream, author=author)
-
-        indexed = sorted(enumerate(edits), key=lambda x: len(x[1].target_text), reverse=True)
-
-        statuses = [False] * len(edits)
-        applied = 0
-        skipped = 0
-
-        for orig_idx, edit in indexed:
-            preview = edit.target_text[:50].replace('\\n', ' ')
-            a, _s = engine.apply_edits([edit])
-            if a > 0:
-                statuses[orig_idx] = True
-                applied += 1
-                print(f"[VL-DEBUG] Edit #{orig_idx} APPLIED: \\"{preview}\\"")
-            else:
-                skipped += 1
-                print(f"[VL-DEBUG] Edit #{orig_idx} SKIPPED: \\"{preview}\\"")
-
-        print(f"[VL-DEBUG] Edits summary: {applied} applied, {skipped} skipped out of {len(edits)} total")
-
-        enable_track_changes(engine.doc)
-        strip_comments(engine.doc)
-        output_stream = engine.save_to_stream()
-        try:
-            doc_bytes = output_stream.getvalue()
-        finally:
-            output_stream.close()
-        return {"doc_bytes": doc_bytes, "applied": applied, "skipped": skipped, "statuses": json.dumps(statuses)}
-    finally:
-        input_stream.close()
+from pipeline import prepare as pipeline_prepare, apply_edits as pipeline_apply
 `);
 
     ready = true;
@@ -202,18 +99,28 @@ def process_document(docx_bytes: bytes, edits_json: str, author: str = 'Vibe Leg
   }
 }
 
-async function processDocument(contractBytes, editsJson) {
+async function processDocument(editsJson, fallbackBytes) {
   if (!ready) throw new Error('Pyodide not ready');
 
   const startTime = Date.now();
-  pyodide.globals.set('js_contract_bytes', contractBytes);
   pyodide.globals.set('js_edits_json', editsJson);
 
-  const result = await pyodide.runPythonAsync(`
-contract_bytes = bytes(js_contract_bytes.to_py())
-result = process_document(contract_bytes, js_edits_json)
+  let pyCode;
+  if (fallbackBytes) {
+    pyodide.globals.set('js_fallback_bytes', fallbackBytes);
+    pyCode = `
+fb = bytes(js_fallback_bytes.to_py())
+result = pipeline_apply(js_edits_json, fallback_bytes=fb)
 result
-  `);
+    `;
+  } else {
+    pyCode = `
+result = pipeline_apply(js_edits_json)
+result
+    `;
+  }
+
+  const result = await pyodide.runPythonAsync(pyCode);
 
   const resultMap = result.toJs();
   const outputBytes = new Uint8Array(resultMap.get('doc_bytes'));
@@ -222,9 +129,9 @@ result
   const statuses = JSON.parse(resultMap.get('statuses'));
 
   if (result.destroy) result.destroy();
-  pyodide.globals.delete('js_contract_bytes');
   pyodide.globals.delete('js_edits_json');
-  await cleanupPythonVars('contract_bytes', 'result');
+  if (fallbackBytes) pyodide.globals.delete('js_fallback_bytes');
+  await cleanupPythonVars('fb', 'result');
 
   console.log('[VL-DEBUG] Adeu processing complete', {
     applied, skipped, totalEdits: statuses.length,
@@ -243,14 +150,14 @@ async function extractText(contractBytes, cleanView) {
 
   const text = await pyodide.runPythonAsync(`
 doc_bytes = bytes(js_extract_bytes.to_py())
-extract_text(doc_bytes, clean_view=js_clean_view)
+pipeline_prepare(doc_bytes, clean_view=js_clean_view)
   `);
 
   pyodide.globals.delete('js_extract_bytes');
   pyodide.globals.delete('js_clean_view');
   await cleanupPythonVars('doc_bytes');
 
-  console.log('[VL-DEBUG] Text extraction complete', {
+  console.log('[VL-DEBUG] Text extraction (prepare) complete', {
     textLength: text.length,
     elapsedMs: Date.now() - startTime
   });
@@ -267,7 +174,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.type === 'extract') {
     const bytes = new Uint8Array(message.contractBytes);
     const cleanView = message.cleanView ?? false;
-    storedDocxBytes = bytes;
 
     extractText(bytes, cleanView)
       .then(text => sendResponse({ success: true, text }))
@@ -276,16 +182,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 
   if (message.type === 'apply') {
-    const bytes = storedDocxBytes || (message.contractBytes ? new Uint8Array(message.contractBytes) : null);
+    const fallbackBytes = message.contractBytes ? new Uint8Array(message.contractBytes) : null;
 
-    if (!bytes) {
-      sendResponse({ success: false, error: 'No document bytes available' });
-      return true;
-    }
-
-    processDocument(bytes, JSON.stringify(message.edits))
+    processDocument(JSON.stringify(message.edits), fallbackBytes)
       .then(({ outputBytes, applied, skipped, statuses }) => {
-        storedDocxBytes = null;
         sendResponse({ success: true, result: Array.from(outputBytes), applied, skipped, statuses });
       })
       .catch(error => sendResponse({ success: false, error: error.message || 'Document processing failed' }));

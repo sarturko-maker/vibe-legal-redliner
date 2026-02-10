@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Vibe Legal Redliner",
-  "version": "1.0.0",
+  "version": "1.0.2",
   "description": "Redline contracts against your playbook using AI. Bring your own API key.",
   "permissions": ["storage", "offscreen", "sidePanel"],
   "action": {

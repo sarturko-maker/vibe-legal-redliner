@@ -16,6 +16,7 @@ from adeu.utils.docx import (
     iter_block_items,
     iter_document_parts,
     iter_paragraph_content,
+    normalize_docx,
 )
 
 logger = structlog.get_logger(__name__)
@@ -36,6 +37,8 @@ def extract_text_from_stream(file_stream: io.BytesIO, filename: str = "document.
         # Ensure stream is at start
         file_stream.seek(0)
         doc = Document(file_stream)
+        # CRITICAL: normalize before extraction to match RedlineEngine's normalized mapper (see engine.py:144-152)
+        normalize_docx(doc)
 
         comments_mgr = CommentsManager(doc)
         comments_map = comments_mgr.extract_comments_data()

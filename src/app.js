@@ -157,7 +157,6 @@ async function processDocument() {
 
     const applyResp = await sendMsg({
       type: 'apply-edits',
-      contractBytes: Array.from(contractBytes),
       edits: aiResponse.edits
     });
 
@@ -293,7 +292,6 @@ async function processBatch() {
 
       const applyResp = await sendMsg({
         type: 'apply-edits',
-        contractBytes: Array.from(contractBytes),
         edits: aiResponse.edits
       });
 
