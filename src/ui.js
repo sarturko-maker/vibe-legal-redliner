@@ -501,6 +501,22 @@ function renderSettingsPage() {
 
       <div class="card">
         <div class="card-header">
+          <h3>Post-Processing</h3>
+        </div>
+        <div class="form-group">
+          <label class="form-check">
+            <input type="checkbox" name="polishFormatting" ${state.settings.polishFormatting ? 'checked' : ''}>
+            <span>Polish formatting</span>
+          </label>
+          <p class="form-hint">
+            After redlining, fix formatting issues like bold headers, indentation,
+            and paragraph spacing to match the original document's style
+          </p>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-header">
           <h3>Audit Log</h3>
         </div>
 

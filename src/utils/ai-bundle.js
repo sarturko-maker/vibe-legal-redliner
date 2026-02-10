@@ -22,16 +22,41 @@ async function fetchWithTimeout(url, options, timeout = API_TIMEOUT) {
   }
 }
 
-const AI_BASE_PROMPT = `You are a legal document reviewer. Analyze this contract against the playbook rules.
+const AI_BASE_PROMPT = `You are a senior commercial lawyer conducting a precise redline review. You analyze contracts against playbook rules and produce surgical, word-level edits.
 Return ONLY a valid JSON object with your suggested edits. No markdown, no explanation, no code blocks.`;
 
 const AI_ANALYSIS_INSTRUCTIONS = `
 ## Your Task
 Analyze the CONTRACT against the PLAYBOOK rules and suggest specific text changes.
 
+## Step 1: Document Understanding (REQUIRED — do this before generating any edits)
+
+Read the DOCUMENT STRUCTURE ANALYSIS and PARAGRAPH MAP provided at the top of the contract text. Then analyse:
+
+1. **TOPIC INVENTORY**: What topics does this document already cover? (definitions, confidentiality scope, permitted disclosure, exclusions, return/destruction, remedies, liability, non-solicitation, term, termination, governing law, dispute resolution, assignment, entire agreement, miscellaneous)
+
+2. **PLAYBOOK COMPARISON**: For each playbook position, classify it:
+   - **GAP**: The document does not address this topic at all → a new clause or sub-clause is needed
+   - **MISALIGNMENT**: The document addresses this topic but the specific position differs from the playbook → a surgical word-level edit to the deviating language is needed
+   - **ADEQUATE**: The document already substantially achieves the playbook's intent, even if worded differently → NO edit needed
+
+3. **EDIT PLAN**: List the edits you will make, noting for each:
+   - What specific text will you target? (minimum necessary scope)
+   - What is the minimum change to bring it into alignment?
+   - For GAPs: where should the new clause be inserted?
+
+4. **VERIFICATION**: Before outputting your JSON, check each edit against these rules:
+   - Is this the minimum necessary change? Could I target fewer words?
+   - Have I avoided rewriting clauses that already achieve the playbook's intent in different words?
+   - For auto-numbered documents: have I avoided including literal clause numbers?
+   - Am I producing a clean, reviewable redline with precise word-level changes?
+
+Include your reasoning in the "reasoning" field of the JSON output.
+
 ## Output Format
 Return a JSON object with this exact structure:
 {
+  "reasoning": "Brief analysis: what topics the document covers, what gaps exist, what misalignments exist, what is adequate as-is",
   "edits": [
     {
       "target_text": "exact text to find in the document",
@@ -45,10 +70,10 @@ Return a JSON object with this exact structure:
 ## Rules for Creating Edits
 
 ### Finding Text (target_text)
-- Must be an EXACT quote from the document - copy/paste precision
+- Must be an EXACT quote from the document — copy/paste precision
 - Include enough context to be unique (usually 5-15 words)
 - Copy text exactly as it appears, including any **bold** or _italic_ markers
-- Don't include paragraph numbers like "1." or "a)"
+- Don't include paragraph numbers like "1." or "a)" that are auto-generated
 - If text appears multiple times, include surrounding words to disambiguate
 
 ### Replacement Text (new_text)
@@ -63,40 +88,58 @@ Return a JSON object with this exact structure:
 - Be concise (1 sentence)
 - Explain WHY the change is needed, not just WHAT changed
 
-## Redlining Principles
+## Edit Precision Rules (CRITICAL)
 
-1. **Minimal Changes**: Only change what the playbook requires. Don't rewrite clauses unnecessarily.
+### Surgical Precision — change ONLY what the playbook requires
+- Make ONLY the changes justified by the playbook. Do not "improve", "clean up", or "modernise" surrounding text.
+- Preserve sentence structure. If the playbook requires changing "exclusive" to "non-exclusive", edit that one word — do not rewrite the entire clause.
+- When adding new language to an existing clause (e.g., adding a carve-out, a proviso, or extending a definition), INSERT at the right point. Include the anchor text + your addition. Do NOT delete and rewrite the whole clause.
+- Do not modify whitespace characters (tabs, spaces, extra line breaks) unless the edit substantively requires it. Whitespace-only changes produce confusing visual noise in track changes.
+- Never include ** or __ formatting markers in target_text or new_text.
 
-2. **Surgical Precision**: Target the specific problematic language, not entire paragraphs.
+### WRONG vs RIGHT Examples
 
-3. **Preserve Structure**: Keep numbering, formatting, and document organization intact.
+WRONG — rewriting a whole clause:
+  target_text: "The Receiving Party shall keep all Confidential Information strictly confidential and shall not disclose it to any third party"
+  new_text: "The Receiving Party agrees to maintain the confidentiality of all Confidential Information received from the Disclosing Party and shall not disclose such information to any third party without prior written consent"
+  (This rewrites the entire sentence when only the consent requirement needed adding)
 
-4. **Legal Accuracy**: Ensure replacements are legally sound and internally consistent.
+RIGHT — surgical insertion:
+  target_text: "shall not disclose it to any third party"
+  new_text: "shall not disclose it to any third party without the prior written consent of the Disclosing Party"
+  (Targets only the specific phrase that needs the addition)
 
-5. **Balanced Approach**: Flag issues for review rather than making aggressive changes when uncertain.
+WRONG — rewriting a clause that already achieves the playbook's intent:
+  target_text: "keep information confidential using reasonable measures"
+  new_text: "maintain the confidentiality of information using commercially reasonable security measures"
+  (Same meaning, different words — no edit needed)
 
-## Examples
+RIGHT — no edit produced (the clause already achieves the playbook's intent)
 
-### Example 1: Modifying a Liability Cap
-{
-  "target_text": "Supplier's total liability shall not exceed $10,000",
-  "new_text": "Supplier's total liability shall not exceed the total fees paid under this Agreement in the twelve (12) months preceding the claim",
-  "comment": "Playbook requires liability cap tied to fees paid, not fixed amount"
-}
+WRONG — renumbering all clauses after an insertion:
+  Multiple edits changing "5.", "6.", "7." to "6.", "7.", "8."
+  (Never renumber existing clauses)
 
-### Example 2: Adding Missing Language
-{
-  "target_text": "shall keep confidential all information",
-  "new_text": "shall keep confidential all information, provided that this obligation shall not apply to information that: (a) is or becomes publicly available through no fault of the receiving party; (b) was known to the receiving party prior to disclosure; or (c) is independently developed by the receiving party",
-  "comment": "Adding standard confidentiality exclusions per playbook"
-}
+RIGHT — using sub-numbering for inserted clauses:
+  "4A." inserted between clauses 4 and 5
 
-### Example 3: Deleting Problematic Text
-{
-  "target_text": "The Receiving Party shall not challenge the validity of any intellectual property rights of the Disclosing Party.",
-  "new_text": "",
-  "comment": "Removing non-challenge provision - not acceptable per playbook"
-}
+## Numbering Rules
+
+The DOCUMENT STRUCTURE ANALYSIS at the top of the contract text tells you whether this document uses automatic or manual numbering. Follow those rules exactly.
+
+Key rules:
+- For AUTO-NUMBERED documents: do NOT include clause numbers in target_text or new_text. The document styles generate numbers automatically. Just provide the text content.
+- For MANUALLY-NUMBERED documents: when inserting between existing clauses, use sub-numbering (e.g., "4A." between 4 and 5). Never renumber existing clauses — this creates a cascade of cosmetic track changes.
+- For BOTH: when inserting a new clause, use \\n (newline) to separate the heading from the body text if the document uses block-style clauses.
+
+## Track Change Awareness
+
+Your edits will be converted into Word track changes:
+- Deleted text appears as red strikethrough
+- Inserted text appears as coloured underline
+- A redline with 5 precise word-level changes is far more useful to a reviewing lawyer than 2 whole-clause rewrites
+- Heavy edits (deleting and reinserting 30+ words) produce cluttered, hard-to-review documents
+- The reviewing lawyer needs to see exactly what changed — your comment field should explain the playbook justification
 
 ## CriticMarkup — Document Revision History
 
@@ -111,9 +154,10 @@ Consider this revision history when analyzing the contract. It provides context 
 - Your new_text should contain plain text only (no CriticMarkup wrappers)
 
 ## Important Notes
-- If no changes are needed, return: {"edits": [], "summary": "No changes required based on playbook analysis"}
-- Quality over quantity - fewer precise edits are better than many vague ones
+- If no changes are needed, return: {"reasoning": "...", "edits": [], "summary": "No changes required based on playbook analysis"}
+- Quality over quantity — fewer precise edits are better than many vague ones
 - When in doubt, err on the side of caution and explain in the comment
+- A clause that says "keep information confidential" does NOT need rewriting just because the playbook says "maintain the confidentiality of information" — same meaning, different words
 `;
 
 const SAFE_MODEL_ID = /^[a-zA-Z0-9._-]+$/;
@@ -366,10 +410,15 @@ function validateEdits(parsed) {
       new_text: edit.new_text,
       comment: edit.comment || ''
     }));
-  return {
+  const result = {
     edits: validEdits,
     summary: parsed.summary || `Found ${validEdits.length} suggested changes`
   };
+  if (parsed.reasoning) {
+    result.reasoning = parsed.reasoning;
+    console.log('[VL-DEBUG] AI reasoning:', parsed.reasoning.substring(0, 500));
+  }
+  return result;
 }
 
 function repairTruncatedJSON(str) {
@@ -459,12 +508,11 @@ ${playbookText}
 
 ---
 
-CONTRACT TO REVIEW:
 ${contractText}
 
 ---
 
-Analyze this contract against the playbook rules above. Return ONLY a JSON object with your suggested edits.`
+Analyze this contract against the playbook rules above. First read the DOCUMENT STRUCTURE ANALYSIS and PARAGRAPH MAP, then follow the Step 1 reasoning process, then return a JSON object with your reasoning and suggested edits.`
   });
 
   const playbookLines = playbookText.split('\n').filter(l => l.trim().length > 0);

@@ -127,7 +127,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.type === 'apply-edits') {
     forwardToOffscreen('apply', {
       contractBytes: message.contractBytes,
-      edits: message.edits
+      edits: message.edits,
+      polishFormatting: message.polishFormatting
     }, sendResponse);
     return true;
   }

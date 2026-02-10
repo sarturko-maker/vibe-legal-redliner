@@ -15,7 +15,10 @@ async function loadAdeuSource() {
     { path: 'python/adeu/utils/__init__.py', dest: '/adeu/utils/__init__.py' },
     { path: 'python/adeu/utils/docx.py', dest: '/adeu/utils/docx.py' },
     { path: 'python/adeu/VERSION', dest: '/adeu/VERSION' },
-    { path: 'python/pipeline.py', dest: '/pipeline.py' }
+    { path: 'python/pipeline.py', dest: '/pipeline.py' },
+    { path: 'python/styler.py', dest: '/styler.py' },
+    { path: 'python/format_extractor.py', dest: '/format_extractor.py' },
+    { path: 'python/doc_analyser.py', dest: '/doc_analyser.py' }
   ];
 
   pyodide.FS.mkdir('/adeu');
@@ -99,23 +102,24 @@ from pipeline import prepare as pipeline_prepare, apply_edits as pipeline_apply
   }
 }
 
-async function processDocument(editsJson, fallbackBytes) {
+async function processDocument(editsJson, fallbackBytes, polishFormatting = false) {
   if (!ready) throw new Error('Pyodide not ready');
 
   const startTime = Date.now();
   pyodide.globals.set('js_edits_json', editsJson);
+  pyodide.globals.set('js_polish', polishFormatting);
 
   let pyCode;
   if (fallbackBytes) {
     pyodide.globals.set('js_fallback_bytes', fallbackBytes);
     pyCode = `
 fb = bytes(js_fallback_bytes.to_py())
-result = pipeline_apply(js_edits_json, fallback_bytes=fb)
+result = pipeline_apply(js_edits_json, fallback_bytes=fb, polish_formatting=js_polish)
 result
     `;
   } else {
     pyCode = `
-result = pipeline_apply(js_edits_json)
+result = pipeline_apply(js_edits_json, polish_formatting=js_polish)
 result
     `;
   }
@@ -127,18 +131,22 @@ result
   const applied = resultMap.get('applied');
   const skipped = resultMap.get('skipped');
   const statuses = JSON.parse(resultMap.get('statuses'));
+  const stylerFixes = resultMap.get('styler_fixes') || 0;
+  const stylerWarnings = JSON.parse(resultMap.get('styler_warnings') || '[]');
 
   if (result.destroy) result.destroy();
   pyodide.globals.delete('js_edits_json');
+  pyodide.globals.delete('js_polish');
   if (fallbackBytes) pyodide.globals.delete('js_fallback_bytes');
   await cleanupPythonVars('fb', 'result');
 
   console.log('[VL-DEBUG] Adeu processing complete', {
     applied, skipped, totalEdits: statuses.length,
+    stylerFixes, stylerWarnings: stylerWarnings.length,
     elapsedMs: Date.now() - startTime
   });
 
-  return { outputBytes, applied, skipped, statuses };
+  return { outputBytes, applied, skipped, statuses, stylerFixes, stylerWarnings };
 }
 
 async function extractText(contractBytes, cleanView) {
@@ -183,10 +191,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
   if (message.type === 'apply') {
     const fallbackBytes = message.contractBytes ? new Uint8Array(message.contractBytes) : null;
+    const polishFormatting = message.polishFormatting ?? false;
 
-    processDocument(JSON.stringify(message.edits), fallbackBytes)
-      .then(({ outputBytes, applied, skipped, statuses }) => {
-        sendResponse({ success: true, result: Array.from(outputBytes), applied, skipped, statuses });
+    processDocument(JSON.stringify(message.edits), fallbackBytes, polishFormatting)
+      .then(({ outputBytes, applied, skipped, statuses, stylerFixes, stylerWarnings }) => {
+        sendResponse({ success: true, result: Array.from(outputBytes), applied, skipped, statuses, stylerFixes, stylerWarnings });
       })
       .catch(error => sendResponse({ success: false, error: error.message || 'Document processing failed' }));
     return true;

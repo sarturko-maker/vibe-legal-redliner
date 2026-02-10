@@ -157,7 +157,8 @@ async function processDocument() {
 
     const applyResp = await sendMsg({
       type: 'apply-edits',
-      edits: aiResponse.edits
+      edits: aiResponse.edits,
+      polishFormatting: state.settings.polishFormatting
     });
 
     if (!applyResp?.success) {
@@ -170,8 +171,9 @@ async function processDocument() {
 
     const applied = applyResp.applied ?? aiResponse.edits.length;
     const skipped = applyResp.skipped ?? 0;
+    const stylerFixes = applyResp.stylerFixes ?? 0;
     state.review.result = new Uint8Array(applyResp.result);
-    console.log('[VL-DEBUG] Edits applied', { applied, skipped, elapsedMs: Date.now() - t0 });
+    console.log('[VL-DEBUG] Edits applied', { applied, skipped, stylerFixes, elapsedMs: Date.now() - t0 });
 
     if (applyResp.statuses && state.review.edits) {
       state.review.edits = state.review.edits.map((edit, i) => ({
@@ -180,9 +182,16 @@ async function processDocument() {
       }));
     }
 
-    const phaseText = skipped > 0
-      ? `Complete — ${applied} of ${applied + skipped} edits applied (${skipped} could not be matched in the document)`
-      : `Complete — ${applied} edits applied`;
+    let phaseText;
+    if (skipped > 0 && stylerFixes > 0) {
+      phaseText = `Complete — ${applied} of ${applied + skipped} edits applied, ${stylerFixes} formatting fixes`;
+    } else if (stylerFixes > 0) {
+      phaseText = `Complete — ${applied} edits applied, ${stylerFixes} formatting fixes`;
+    } else if (skipped > 0) {
+      phaseText = `Complete — ${applied} of ${applied + skipped} edits applied (${skipped} could not be matched in the document)`;
+    } else {
+      phaseText = `Complete — ${applied} edits applied`;
+    }
 
     updateJob(state.review.job, {
       status: JOB_STATUS.COMPLETE,
@@ -292,7 +301,8 @@ async function processBatch() {
 
       const applyResp = await sendMsg({
         type: 'apply-edits',
-        edits: aiResponse.edits
+        edits: aiResponse.edits,
+        polishFormatting: state.settings.polishFormatting
       });
 
       if (!applyResp?.success) {
@@ -301,9 +311,15 @@ async function processBatch() {
 
       const applied = applyResp.applied ?? job.editCount;
       const skipped = applyResp.skipped ?? 0;
-      const phaseText = skipped > 0
-        ? `Complete — ${applied}/${applied + skipped} applied`
-        : `Complete — ${applied} edits applied`;
+      const batchStylerFixes = applyResp.stylerFixes ?? 0;
+      let phaseText;
+      if (batchStylerFixes > 0) {
+        phaseText = `Complete — ${applied} edits applied, ${batchStylerFixes} formatting fixes`;
+      } else if (skipped > 0) {
+        phaseText = `Complete — ${applied}/${applied + skipped} applied`;
+      } else {
+        phaseText = `Complete — ${applied} edits applied`;
+      }
 
       job.result = new Uint8Array(applyResp.result);
       updateJob(job, { status: JOB_STATUS.COMPLETE, progress: 100, phase: phaseText });
@@ -626,6 +642,7 @@ function handleChange(e) {
 
   if (name === 'apiKey') { state.settings.apiKey = value; state.connectionTested = false; saveSettings(); return; }
   if (name === 'rememberApiKey') { state.rememberApiKey = e.target.checked; saveSettings(); return; }
+  if (name === 'polishFormatting') { state.settings.polishFormatting = e.target.checked; saveSettings(); return; }
   if (name === 'model') { state.settings.model = value; saveSettings(); return; }
   if (name === 'playbook-select') { state.selectedPlaybookId = value; render(); return; }
 

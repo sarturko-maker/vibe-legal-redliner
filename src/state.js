@@ -6,7 +6,8 @@ export const state = {
     provider: 'gemini',
     apiKey: '',
     model: 'gemini-2.0-flash-exp',
-    engine: 'adeu'
+    engine: 'adeu',
+    polishFormatting: false
   },
   playbooks: [],
   selectedPlaybookId: 'nda-standard',
