@@ -645,18 +645,90 @@ def _strip_redundant_clause_number(new_text, paragraph_element):
 
     # Paragraph has auto-numbering — strip leading clause number patterns
     # Patterns: "10.", "10.1", "(a)", "(iv)", "Section 10."
+    # Must NOT match alphanumeric identifiers like "5A.", "5B." (those are clause titles)
     stripped = re.sub(
         r'^(?:'
         r'(?:Section|Article|Clause)\s+)?'  # Optional prefix
-        r'(?:\d+(?:\.\d+)*\.?\s*'           # "10." or "10.1." or "10 "
+        r'(?:\d+(?:\.\d+)*\.(?=\s)'         # "10." or "10.1." followed by space (not "5A.")
+        r'|\d+(?:\.\d+)+\s*'               # "10.1" multi-level without trailing dot
         r'|\([a-z]+\)\s*'                    # "(a)" or "(iv)"
         r'|\([A-Z]+\)\s*'                    # "(A)" or "(IV)"
         r'|\([ivxlcdm]+\)\s*'               # "(iv)" roman
-        r')',
+        r')\s*',
         '',
         new_text
     )
     return stripped if stripped else new_text  # Don't return empty
+
+
+def _insert_new_paragraphs(engine, lines, anchor_paragraph, anchor_rPr):
+    """
+    Create new <w:p> elements for each line and insert them after anchor_paragraph.
+
+    Each paragraph is wrapped in <w:ins> for track changes, copies <w:pPr> from
+    the anchor paragraph for consistent styling, and inherits run formatting from
+    anchor_rPr.
+
+    Compensates for: Adeu's track_insert() relies on anchor_run parent chain which
+    can break after track_delete_run() wraps runs in <w:del>. This function creates
+    paragraphs directly in the DOM, mirroring the server's insert_paragraph_after_index().
+
+    When upgrading Adeu: If track_insert() is fixed to handle anchor runs inside
+    <w:del> elements correctly, this function may become unnecessary for the
+    delegation path. However, it's more efficient to create paragraphs directly
+    than to delete-and-reinsert anchor text through track_insert().
+    """
+    body = anchor_paragraph.getparent()
+    if body is None:
+        print("[VL-DEBUG] _insert_new_paragraphs: anchor has no parent body")
+        return 0
+
+    try:
+        p_index = list(body).index(anchor_paragraph)
+    except ValueError:
+        print("[VL-DEBUG] _insert_new_paragraphs: anchor not found in body")
+        return 0
+
+    inserted = 0
+    for i, line_text in enumerate(lines):
+        line_text = line_text.strip()
+        if not line_text:
+            continue
+
+        # Create new paragraph element
+        new_p = create_element("w:p")
+
+        # Copy paragraph properties from anchor (preserves style, spacing, indentation)
+        # but REMOVE <w:numPr> so new paragraphs don't inherit auto-numbering
+        anchor_pPr = anchor_paragraph.find(qn("w:pPr"))
+        if anchor_pPr is not None:
+            pPr_copy = deepcopy(anchor_pPr)
+            numPr = pPr_copy.find(qn("w:numPr"))
+            if numPr is not None:
+                pPr_copy.remove(numPr)
+            new_p.append(pPr_copy)
+
+        # Create w:ins wrapper for track changes
+        ins_tag = engine._create_track_change_tag("w:ins")
+
+        # Create run with inherited formatting
+        run = create_element("w:r")
+        if anchor_rPr is not None:
+            run.append(deepcopy(anchor_rPr))
+        t = create_element("w:t")
+        t.text = line_text
+        t.set(qn("xml:space"), "preserve")
+        run.append(t)
+        ins_tag.append(run)
+        new_p.append(ins_tag)
+
+        # Insert after anchor paragraph (in document order)
+        body.insert(p_index + 1 + inserted, new_p)
+        inserted += 1
+
+    if inserted > 0:
+        print(f"[VL-DEBUG] _insert_new_paragraphs: created {inserted} new paragraphs")
+    return inserted
 
 
 def _check_rewrite_ratio(diffs):
@@ -748,59 +820,90 @@ def _apply_edit_with_word_diff(engine, edit):
     parent_p = target_runs[0]._element.getparent()
     clean_new_text = _strip_redundant_clause_number(clean_new_text, parent_p)
 
-    # Issue 6: Multi-line new_text → delegate to engine for paragraph creation
-    if '\n' in clean_new_text:
-        print(f"[VL-DEBUG] Word-diff: new_text has newlines, delegating for paragraph creation")
-        proxy = DocumentEdit(target_text=edit.target_text, new_text=clean_new_text)
-        return _delegate_with_match(engine, proxy, mapper, start_idx)
+    # Split multi-line new_text: first line is inline edit, rest are new paragraphs.
+    # This replaces the old delegation to Adeu's track_insert() which could fail
+    # when the anchor_run parent chain was broken by prior track_delete_run().
+    has_newlines = '\n' in clean_new_text
+    if has_newlines:
+        parts = clean_new_text.split('\n')
+        first_line = parts[0]
+        remaining_lines = [l for l in parts[1:] if l.strip()]
+        print(f"[VL-DEBUG] Word-diff: multi-line edit — 1 inline + {len(remaining_lines)} new paragraphs")
+    else:
+        first_line = clean_new_text
+        remaining_lines = []
 
-    if runs_plain_text == clean_new_text:
+    if runs_plain_text == first_line and not remaining_lines:
         return (0, 1)
 
-    # 7. Build char format map
+    # 7. Build char format map and save anchor paragraph reference
+    # (must capture anchor_p BEFORE inline DOM surgery detaches runs)
     char_format_map = _build_char_format_map(target_runs)
+    anchor_p = target_runs[0]._element.getparent()
 
-    # 8. Word-level diff
-    diffs = _diff_words(runs_plain_text, clean_new_text)
+    # Handle inline part (first line vs target text)
+    inline_applied = False
+    if runs_plain_text != first_line:
+        # 8. Word-level diff
+        diffs = _diff_words(runs_plain_text, first_line)
 
-    # Issue 2: Monitor rewrite ratio
-    ratio = _check_rewrite_ratio(diffs)
-    if ratio > 0.7:
-        print(f"[VL-DEBUG] Word-diff: heavy rewrite detected ({ratio:.0%})")
+        # Issue 2: Monitor rewrite ratio
+        ratio = _check_rewrite_ratio(diffs)
+        if ratio > 0.7:
+            print(f"[VL-DEBUG] Word-diff: heavy rewrite detected ({ratio:.0%})")
 
-    # 9. Safety check: verify accept-all-changes produces correct output
-    reconstructed = "".join(text for op, text in diffs if op >= 0)
-    if reconstructed != clean_new_text:
-        print(f"[VL-DEBUG] Word-diff: reconstruction mismatch, delegating to engine")
-        proxy = DocumentEdit(target_text=edit.target_text, new_text=clean_new_text)
-        return _delegate_with_match(engine, proxy, mapper, start_idx)
+        # 9. Safety check: verify accept-all-changes produces correct output
+        reconstructed = "".join(text for op, text in diffs if op >= 0)
+        if reconstructed != first_line:
+            if not has_newlines:
+                # Single-line edit: delegate to engine as before
+                print(f"[VL-DEBUG] Word-diff: reconstruction mismatch, delegating to engine")
+                proxy = DocumentEdit(target_text=edit.target_text, new_text=clean_new_text)
+                return _delegate_with_match(engine, proxy, mapper, start_idx)
+            else:
+                # Multi-line edit: skip inline part but still insert paragraphs below
+                print(f"[VL-DEBUG] Word-diff: inline reconstruction mismatch, skipping inline part")
+        else:
+            # 10. Build OOXML elements from diff
+            new_elements = _build_diff_elements(engine, diffs, char_format_map)
+            if new_elements:
+                # 11. DOM surgery: insert new elements before first target run, remove old runs
+                first_run_elem = target_runs[0]._element
+                parent = first_run_elem.getparent()
+                insert_idx = list(parent).index(first_run_elem)
 
-    # 10. Build OOXML elements from diff
-    new_elements = _build_diff_elements(engine, diffs, char_format_map)
-    if not new_elements:
-        return (0, 1)
+                for i, elem in enumerate(new_elements):
+                    parent.insert(insert_idx + i, elem)
 
-    # 11. DOM surgery: insert new elements before first target run, remove old runs
-    first_run_elem = target_runs[0]._element
-    parent = first_run_elem.getparent()
-    insert_idx = list(parent).index(first_run_elem)
+                for run in target_runs:
+                    r_parent = run._element.getparent()
+                    if r_parent is not None:
+                        r_parent.remove(run._element)
 
-    for i, elem in enumerate(new_elements):
-        parent.insert(insert_idx + i, elem)
+                inline_applied = True
+    else:
+        # First line matches target exactly — anchor text preserved (GAP edit pattern)
+        inline_applied = True  # No change needed, anchor stays untouched
 
-    for run in target_runs:
-        r_parent = run._element.getparent()
-        if r_parent is not None:
-            r_parent.remove(run._element)
+    # Insert remaining lines as new paragraphs (direct DOM creation)
+    # anchor_p was saved above before inline surgery detached the runs
+    paragraphs_inserted = 0
+    if remaining_lines:
+        anchor_rPr = _get_rpr_at(char_format_map, 0) if char_format_map else None
+        paragraphs_inserted = _insert_new_paragraphs(
+            engine, remaining_lines, anchor_p, anchor_rPr
+        )
 
     # 12. Rebuild mapper after DOM surgery.
     # NOTE: _build_map() is a private method on DocumentMapper — fragile coupling.
     # If Adeu renames/refactors this method, this call will break.
-    mapper._build_map()
-    if hasattr(engine, 'clean_mapper') and engine.clean_mapper is not None:
-        engine.clean_mapper = None
+    if inline_applied or paragraphs_inserted > 0:
+        mapper._build_map()
+        if hasattr(engine, 'clean_mapper') and engine.clean_mapper is not None:
+            engine.clean_mapper = None
+        return (1, 0)
 
-    return (1, 0)
+    return (0, 1)
 
 
 # ---------------------------------------------------------------------------

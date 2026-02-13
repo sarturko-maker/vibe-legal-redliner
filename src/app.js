@@ -140,6 +140,7 @@ async function processDocument() {
     console.log('[VibeLegal] Raw AI response:', aiResponse.rawContent);
     console.log('[VibeLegal] Parsed edits:', aiResponse.edits);
     state.review.edits = aiResponse.edits;
+    state.review.reasoning = aiResponse.reasoning || null;
 
     updateJob(state.review.job, {
       progress: 60,
@@ -532,6 +533,7 @@ function handleClick(e) {
       state.review.job = null;
       state.review.result = null;
       state.review.edits = null;
+      state.review.reasoning = null;
       render();
       break;
     case 'process':

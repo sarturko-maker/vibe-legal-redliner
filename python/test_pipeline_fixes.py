@@ -138,6 +138,11 @@ def test_issue_4_strip_redundant_clause_number():
     assert _strip_redundant_clause_number("(a) First item", p_elem) == "First item"
     assert _strip_redundant_clause_number("Section 5. Term", p_elem) == "Term"
 
+    # Alphanumeric identifiers like "5A." must NOT be stripped (they're clause titles)
+    assert _strip_redundant_clause_number("5A. Compelled Disclosure", p_elem) == "5A. Compelled Disclosure"
+    assert _strip_redundant_clause_number("5B. Remedies", p_elem) == "5B. Remedies"
+    assert _strip_redundant_clause_number("10A. Additional Terms", p_elem) == "10A. Additional Terms"
+
     # No numPr → no stripping (manual numbering preserved)
     p2 = doc.add_paragraph("Manual numbering")
     assert _strip_redundant_clause_number("10. Text", p2._element) == "10. Text"

@@ -189,19 +189,119 @@ function renderJobStatus(job) {
 
 function renderEditsPanel() {
   const edits = state.review?.edits;
-  if (!edits || edits.length === 0) return '';
+  const reasoning = state.review?.reasoning;
+  if ((!edits || edits.length === 0) && !reasoning) return '';
+
+  // Structured reasoning (object with analysis array)
+  if (reasoning && typeof reasoning === 'object' && Array.isArray(reasoning.analysis)) {
+    return renderStructuredAnalysis(reasoning, edits || []);
+  }
+
+  // Legacy string reasoning or no reasoning — show simple view
+  return renderLegacyEditsPanel(reasoning, edits || []);
+}
+
+function renderStructuredAnalysis(reasoning, edits) {
+  const analysis = reasoning.analysis || [];
+  const misalignments = analysis.filter(a => a.status === 'MISALIGNMENT');
+  const gaps = analysis.filter(a => a.status === 'GAP');
+  const adequate = analysis.filter(a => a.status === 'ADEQUATE');
+  const flagged = analysis.filter(a => a.status === 'FLAGGED');
+  const gapEdits = edits.filter(e => e.edit_type === 'GAP');
+  const misalignEdits = edits.filter(e => e.edit_type === 'MISALIGNMENT');
 
   return `
+    <div class="analysis-panel">
+      ${reasoning.document_summary ? `
+        <div class="analysis-summary-card">
+          <div class="analysis-summary-text">${escapeHtml(reasoning.document_summary)}</div>
+          <div class="analysis-counts">
+            ${reasoning.playbook_rules_found ? `<span class="analysis-count analysis-count--rules">${analysis.length}/${reasoning.playbook_rules_found} rules</span>` : ''}
+            ${misalignEdits.length > 0 ? `<span class="analysis-count analysis-count--change">${misalignEdits.length} change${misalignEdits.length !== 1 ? 's' : ''}</span>` : ''}
+            ${gapEdits.length > 0 ? `<span class="analysis-count analysis-count--gap">${gapEdits.length} new clause${gapEdits.length !== 1 ? 's' : ''}</span>` : ''}
+            ${adequate.length > 0 ? `<span class="analysis-count analysis-count--adequate">${adequate.length} adequate</span>` : ''}
+            ${flagged.length > 0 ? `<span class="analysis-count analysis-count--flagged">${flagged.length} flagged</span>` : ''}
+          </div>
+        </div>
+      ` : ''}
+
+      ${misalignments.length > 0 ? `
+        <div class="analysis-group">
+          <div class="analysis-group-header analysis-group-header--change">
+            <span class="analysis-group-icon">&#9998;</span>
+            <span>Changes Made (${misalignments.length})</span>
+          </div>
+          ${misalignments.map(item => renderAnalysisItem(item, edits)).join('')}
+        </div>
+      ` : ''}
+
+      ${gaps.length > 0 ? `
+        <div class="analysis-group">
+          <div class="analysis-group-header analysis-group-header--gap">
+            <span class="analysis-group-icon">&#10010;</span>
+            <span>New Clauses Inserted (${gaps.length})</span>
+          </div>
+          ${gaps.map(item => renderAnalysisItem(item, edits)).join('')}
+        </div>
+      ` : ''}
+
+      ${adequate.length > 0 ? `
+        <div class="analysis-group">
+          <div class="analysis-group-header analysis-group-header--adequate">
+            <span class="analysis-group-icon">&#10003;</span>
+            <span>Adequate — No Change Needed (${adequate.length})</span>
+          </div>
+          ${adequate.map(item => renderAnalysisItem(item, edits)).join('')}
+        </div>
+      ` : ''}
+
+      ${flagged.length > 0 ? `
+        <div class="analysis-group">
+          <div class="analysis-group-header analysis-group-header--flagged">
+            <span class="analysis-group-icon">&#9888;</span>
+            <span>Flagged for Review (${flagged.length})</span>
+          </div>
+          ${flagged.map(item => renderAnalysisItem(item, edits)).join('')}
+        </div>
+      ` : ''}
+
+      ${edits.length > 0 ? renderDetailedEdits(edits) : ''}
+    </div>
+  `;
+}
+
+function renderAnalysisItem(item, edits) {
+  const statusClass = (item.status || '').toLowerCase();
+  const title = item.rule || item.topic || 'Untitled';
+  return `
+    <details class="analysis-item">
+      <summary class="analysis-item-header">
+        <span class="analysis-item-badge analysis-item-badge--${statusClass}">${escapeHtml(item.status)}</span>
+        <span class="analysis-item-topic">${escapeHtml(title)}</span>
+        ${item.contract_clause ? `<span class="analysis-item-clause">${escapeHtml(item.contract_clause)}</span>` : ''}
+      </summary>
+      <div class="analysis-item-body">
+        ${item.action ? `<div class="analysis-item-action">${escapeHtml(item.action)}</div>` : ''}
+        ${escapeHtml(item.explanation || '')}
+      </div>
+    </details>
+  `;
+}
+
+function renderDetailedEdits(edits) {
+  return `
     <details class="edits-panel">
-      <summary class="edits-summary">View AI edits (${edits.length})</summary>
+      <summary class="edits-summary">Edit log (${edits.length})</summary>
       <div class="edits-list">
         ${edits.map((edit, i) => {
     const statusClass = edit.applied === true ? 'applied' : edit.applied === false ? 'skipped' : '';
     const statusLabel = edit.applied === true ? 'Applied' : edit.applied === false ? 'Skipped' : '';
+    const typeClass = (edit.edit_type || '').toLowerCase();
     return `
           <div class="edit-item ${statusClass}">
             <div class="edit-header">
               <span class="edit-number">#${i + 1}</span>
+              <span class="edit-type-badge edit-type-badge--${typeClass}">${escapeHtml(edit.edit_type || 'EDIT')}</span>
               ${statusLabel ? `<span class="edit-status ${statusClass}">${statusLabel}</span>` : ''}
             </div>
             <div class="edit-field">
@@ -222,6 +322,19 @@ function renderEditsPanel() {
   }).join('')}
       </div>
     </details>
+  `;
+}
+
+function renderLegacyEditsPanel(reasoning, edits) {
+  return `
+    <div class="analysis-panel">
+      ${reasoning ? `
+        <div class="analysis-summary-card">
+          <div class="analysis-summary-text">${escapeHtml(typeof reasoning === 'string' ? reasoning : '')}</div>
+        </div>
+      ` : ''}
+      ${edits.length > 0 ? renderDetailedEdits(edits) : ''}
+    </div>
   `;
 }
 
